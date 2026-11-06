@@ -12,9 +12,9 @@ from aiogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo,
 )
 
-TOKEN = "ТВОЙ_ТОКЕН"
+TOKEN = "9056825852:AAH-AKRlntMSkdLMfEbBqB9HsFcPsZFqabA"
 
-MINI_APP_URL = "ССЫЛКА_НА_ТВОЙ_САЙТ_GITHUB_PAGES" 
+MINI_APP_URL = "https://molniais80-rgb.github.io/miniap/" 
 
 CURRENCY = {"g": "💎", "s": "⭐"}
 
