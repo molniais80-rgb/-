@@ -73,9 +73,7 @@ async def cmd_offer(message: Message):
     who = message.from_user.first_name or "Пользователь"
     caption = OFFER_TEXT.format(who=who, sum=raw_sum, cur=CURRENCY[cur_key], name=gift_name(url))
 
-    photo = PHOTO_FILE_ID or FSInputFile("offer.jpg")
-    await message.answer_photo(photo=photo, caption=caption, reply_markup=offer_kb(oid))
-
+   await message.answer(text=caption, reply_markup=offer_kb(oid))
     # Если команду ввели в группе, бот удалит исходное сообщение /offer, чтобы было красиво
     if message.chat.type != "private":
         try:
