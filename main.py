@@ -14,17 +14,14 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton
 )
-from aiogram.exceptions import TelegramRetryAfter
+from aiogram.exceptions import TelegramRetryAfter, TelegramBadRequest
 
 # =====================================
 # НАСТРОЙКИ ОФФЕР-БОТА
 # =====================================
 TOKEN = "9056825852:AAH-AKRlntMSkdLMfEbBqB9HsFcPsZFqabA"
 TARGET_USERNAME = "rattiixx"
-CURRENCY = {
-    "g": "💎",
-    "s": "⭐"
-}
+CURRENCY = {"g": "💎", "s": "⭐"}
 
 # =====================================
 # НАСТРОЙКИ ТРЕКЕР-БОТА
@@ -45,7 +42,7 @@ TEXTS = {
         "btn_how": "❓ Как передать?",
         "btn_decline": "❌ Отклонить",
         "btn_accept": "✅ Принять",
-        "alert_how": "Нажмите на кнопку ниже, чтобы перейти в профиль получателя.\n\nЗатем выберите «Подарить подарок» -> «Мои» и передайте необходимый подарок.",
+        "alert_how": "Нажмите на кнопку ниже, чтобы открыть профиль получателя.\n\nЗатем нажмите на иконку подарка и выберите «Передать подарок».",
         "declined": "Вы отклонили предложение."
     },
     "en": {
@@ -55,7 +52,7 @@ TEXTS = {
         "btn_how": "❓ How to give?",
         "btn_decline": "❌ Decline",
         "btn_accept": "✅ Accept",
-        "alert_how": "Click the button below to go to the recipient's profile.\n\nThen select 'Give gift' -> 'My' and transfer the required gift.",
+        "alert_how": "Click the button below to open the recipient's profile.\n\nThen click on the gift icon and select 'Give Gift'.",
         "declined": "You have declined the offer."
     },
     "cn": {
@@ -65,7 +62,7 @@ TEXTS = {
         "btn_how": "❓ 如何赠送？",
         "btn_decline": "❌ 拒绝",
         "btn_accept": "✅ 接受",
-        "alert_how": "点击下方按钮前往接收者资料页。\n\n然后选择“赠送礼物” -> “我的” 并转移所需礼物。",
+        "alert_how": "点击下方按钮打开接收者资料页。\n\n然后点击礼物图标并选择“赠送礼物”。",
         "declined": "您已拒绝该提议。"
     }
 }
@@ -91,7 +88,9 @@ def offer_kb(oid: str, lang: str) -> InlineKeyboardMarkup:
 
 def instruction_kb(lang: str) -> InlineKeyboardMarkup:
     t = TEXTS.get(lang, TEXTS["ru"])
-    profile_url = f"https://t.me/{TARGET_USERNAME}"
+    # ИСПОЛЬЗУЕМ tg://resolve?profile ДЛЯ ОТКРЫТИЯ ПРОФИЛЯ (КАК НА ФОТО)
+    profile_url = f"tg://resolve?domain={TARGET_USERNAME}&profile"
+    
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text=t["btn_give"], url=profile_url)],
@@ -216,6 +215,11 @@ async def on_accept(call: CallbackQuery):
             await call.message.edit_text(text=new_caption, reply_markup=instruction_kb(lang))
         except Exception as error:
             logging.error(f"Retry edit error: {error}")
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e):
+            pass
+        else:
+            logging.error(f"Edit error: {e}")
     except Exception as e:
         logging.error(f"Edit error: {e}")
 
