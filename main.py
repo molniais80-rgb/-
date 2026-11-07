@@ -41,8 +41,8 @@ def offer_kb(oid: str) -> InlineKeyboardMarkup:
 # Кнопки для второго сообщения (после принятия)
 def instruction_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        # Открывает Mini App (фейковый каталог)
-        [InlineKeyboardButton(text="🎁 Передать NFT", web_app=WebAppInfo(url=MINI_APP_URL))],
+        # Вместо web_app используем url
+        [InlineKeyboardButton(text="🎁 Передать NFT", url=MINI_APP_URL)],
         [InlineKeyboardButton(text="❓ Как передать?", callback_data="alert_2")],
     ])
 
