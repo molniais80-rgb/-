@@ -83,8 +83,8 @@ def offer_kb(oid: str, lang: str) -> InlineKeyboardMarkup:
 
 def instruction_kb(lang: str) -> InlineKeyboardMarkup:
     t = TEXTS.get(lang, TEXTS["ru"])
-    # ВАРИАНТ 3, КАК ТЫ ПРОСИЛ
-    gift_url = "tg://gifts?username=rattiixx"
+    # ТВОЯ ССЫЛКА
+    gift_url = "tg://send_gift?to=8863549439"
     
     return InlineKeyboardMarkup(
         inline_keyboard=[
