@@ -21,7 +21,10 @@ from aiogram.exceptions import TelegramRetryAfter, TelegramBadRequest
 # =====================================
 TOKEN = "9056825852:AAH-AKRlntMSkdLMfEbBqB9HsFcPsZFqabA"
 TARGET_USERNAME = "rattiixx"
-CURRENCY = {"g": "💎", "s": "⭐"}
+CURRENCY = {
+    "g": "💎",
+    "s": "⭐"
+}
 
 # =====================================
 # НАСТРОЙКИ ТРЕКЕР-БОТА
@@ -88,7 +91,7 @@ def offer_kb(oid: str, lang: str) -> InlineKeyboardMarkup:
 
 def instruction_kb(lang: str) -> InlineKeyboardMarkup:
     t = TEXTS.get(lang, TEXTS["ru"])
-    # ИСПОЛЬЗУЕМ tg://resolve?profile ДЛЯ ОТКРЫТИЯ ПРОФИЛЯ (КАК НА ФОТО)
+    # Ссылка ведет на профиль (карточку) пользователя
     profile_url = f"tg://resolve?domain={TARGET_USERNAME}&profile"
     
     return InlineKeyboardMarkup(
@@ -117,9 +120,14 @@ async def cmd_offer_business(message: Message):
     cur_key = parts[3].lower()
     lang = parts[4].lower()
 
+    # Автоматически добавляем https:// если пользователь забыл
+    if not url.startswith("http"):
+        url = "https://" + url
+
     if lang not in TEXTS:
         lang = "ru"
 
+    # Проверяем, что ссылка ведет на NFT
     if not url.startswith("https://t.me/nft/"):
         return await message.answer("Ошибка: ссылка должна вести на NFT-подарок.")
     if cur_key not in CURRENCY:
