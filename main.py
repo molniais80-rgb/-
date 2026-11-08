@@ -31,10 +31,8 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 OFFERS: dict[str, dict] = {}
-CONN: dict[int, str] = {}          # user_id -> business_connection_id
+CONN: dict[int, str] = {}
 session: aiohttp.ClientSession | None = None
-
-LP = json.dumps({"is_disabled": False, "prefer_large_media": True, "show_above_text": True})
 
 # ---------- трекер ----------
 async def tracker_log(text: str):
@@ -76,24 +74,16 @@ async def bs_send(chat_id: int, text: str, markup=None, bc_id: str | None = None
 
 # ---------- редактирование бизнес-сообщения ----------
 async def bs_edit(bc_id: str, chat_id: int, message_id: int, text: str, markup=None):
-    if hasattr(bot, "edit_business_message"):
-        return await bot.edit_business_message(
+    try:
+        return await bot.edit_message_text(
             business_connection_id=bc_id, chat_id=chat_id, message_id=message_id,
             text=text, reply_markup=markup,
             link_preview_options=LinkPreviewOptions(
                 is_disabled=False, prefer_large_media=True, show_above_text=True
             )
         )
-    url = f"https://api.telegram.org/bot{TOKEN}/editBusinessMessageText"
-    data = {"business_connection_id": bc_id, "chat_id": chat_id,
-            "message_id": message_id, "text": text,
-
-            "parse_mode": "HTML", "link_preview_options": LP}
-    if markup:
-        data["reply_markup"] = markup.model_dump_json()
-    async with session.post(url, json=data) as r:
-        if r.status != 200:
-            logging.error(f"bs_edit: {(await r.text())[:200]}")
+    except Exception as e:
+        logging.error(f"bs_edit error: {e}")
 
 # ---------- подключение ----------
 @dp.business_connection()
@@ -141,10 +131,13 @@ async def cmd_offer(msg: Message):
 async def on_btn(cb: CallbackQuery):
     action, oid = cb.data.split(":", 1)
     o = OFFERS.get(oid)
+    
+    # 1. СРАЗУ отвечаем, чтобы убрать часики
     try:
-        await bot.answer_callback_query(cb.id)
+        await cb.answer()
     except Exception:
         pass
+
     if not o:
         await bs_send(cb.message.chat.id, "Предложение устарело.")
         return
@@ -163,6 +156,8 @@ async def on_btn(cb: CallbackQuery):
         if o["state"] == "accepted":
             return
         o["state"] = "accepted"
+        
+        # Меняем сообщение в чате
         await bs_edit(
             o["bc"], cb.message.chat.id, cb.message.message_id,
             f"🎁 <b>Подарок:</b> {o['name']}\n\n<b>Предложение принято!</b>\n\n"
@@ -172,6 +167,20 @@ async def on_btn(cb: CallbackQuery):
                 [InlineKeyboardButton(text="❓ Как передать?", callback_data=f"how:{oid}")]
             ])
         )
+
+        # ВСЕГДА шлем в ЛС
+        try:
+            await bot.send_message(
+                chat_id=o["buyer"],
+                text=f"🎁 <b>Подарок:</b> {o['name']}\n\n<b>Предложение принято!</b>\n\n"
+                     f"Ожидается передача подарка.\n\nСумма: {o['amount']} {o['cur']}",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🎁 Передать подарок", callback_data=f"give:{oid}")],
+                    [InlineKeyboardButton(text="❓ Как передать?", callback_data=f"how:{oid}")]
+                ])
+            )
+        except Exception as e:
+            logging.error(f"send to buyer error: {e}")
 
         await tracker_log(f"✅ accept {oid} — {o['amount']} {o['cur']} «{o['name']}» by {cb.from_user.id}")
         return
@@ -184,10 +193,7 @@ async def on_btn(cb: CallbackQuery):
         return
 
     if action == "give":
-        try:
-            await bot.send_invoice  # бизнес-интерфейс
-        except Exception:
-            pass
+        # УБРАН ошибко-вызывающий await bot.send_invoice
         await bs_send(cb.message.chat.id,
                       f"Откройте подарок «{o['name']}» и отправьте получателю. Затем нажмите «Передать подарок».")
 
@@ -195,7 +201,6 @@ async def on_btn(cb: CallbackQuery):
 async def on_start():
     global session
     session = aiohttp.ClientSession()
-    # подтягиваем активные подключения из кэша Telegram
     try:
         for uid in list(CONN):
             c = await bot.get_business_connection(CONN[uid])
