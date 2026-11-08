@@ -6,6 +6,7 @@ import aiohttp
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.filters import CommandStart
 from aiogram.types import (
     Message, CallbackQuery, LinkPreviewOptions,
     InlineKeyboardMarkup, InlineKeyboardButton
@@ -68,6 +69,28 @@ LARGE_PREVIEW = LinkPreviewOptions(
     prefer_large_media=True,
     show_above_text=True
 )
+
+# =====================================
+# КОМАНДА /start (НОВОЕ)
+# =====================================
+@dp.message(CommandStart())
+async def cmd_start(message: Message):
+    text = (
+        "<b>👋 Добро пожаловать!</b>\n\n"
+        "Чтобы создать оффер, отправь команду в формате:\n"
+        "<code>.оффер [ссылка] [сумма] [валюта] [язык]</code>\n\n"
+        "<b>Пример:</b>\n"
+        "<code>.оффер t.me/nft/LibertyFigure-94879 1000 s ru</code>\n\n"
+        "——————\n"
+        "<b>Валюты:</b>\n"
+        "⭐ <b>s</b> — Звёзды (Telegram Stars)\n"
+        "💎 <b>g</b> — Граммы (Gifts / Gram)\n\n"
+        "<b>Языки:</b>\n"
+        "🇷🇺 <b>ru</b> — Русский\n"
+        "🇬🇧 <b>en</b> — English\n"
+        "🇨🇳 <b>cn</b> — 中文 (Китайский)"
+    )
+    await message.answer(text)
 
 # =====================================
 # КНОПКИ
